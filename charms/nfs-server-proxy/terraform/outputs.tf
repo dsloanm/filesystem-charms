@@ -1,4 +1,4 @@
-# Copyright 2025 Canonical Ltd.
+# Copyright 2025-2026 Canonical Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-output "app_name" {
-  value = juju_application.nfs-server-proxy.name
+output "application" {
+  value = juju_application.nfs-server-proxy
 }
 
 output "provides" {

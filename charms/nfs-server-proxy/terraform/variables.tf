@@ -13,49 +13,56 @@
 # limitations under the License.
 
 variable "app_name" {
-  description = "Application name"
+  description = "Name for the deployed application"
   type        = string
   default     = "nfs-server-proxy"
 }
 
 variable "base" {
-  description = "Charm base"
+  description = "Operating system base for the charm (for example, ubuntu@24.04)"
   type        = string
-  default     = "ubuntu@24.04"
+  default     = null
 }
 
 variable "channel" {
-  description = "Charm channel"
+  description = "Charm channel to deploy from"
   type        = string
   default     = "latest/edge"
 }
 
 variable "config" {
-  description = "Charm configuration"
+  description = "Map of charm configuration options"
   type        = map(string)
   default     = {}
 }
 
 variable "constraints" {
-  description = "Deployment constraints"
+  description = "Constraints string for the charm deployment"
   type        = string
-  default     = ""
+  default     = null
+}
+
+variable "machines" {
+  description = "List of machine resources to deploy the charm on"
+  type        = set(string)
+  default     = []
 }
 
 variable "model_uuid" {
-  description = "Model UUID"
+  description = "UUID of the Juju model to deploy the charm into"
   type        = string
+  nullable    = false
 }
 
 variable "revision" {
-  description = "Charm revision"
+  description = "Charm revision to deploy. Null deploys the latest on the given channel"
   type        = number
   nullable    = true
   default     = null
 }
 
 variable "units" {
-  description = "Number of units"
+  description = "Number of application units to deploy"
   type        = number
   default     = 1
 }

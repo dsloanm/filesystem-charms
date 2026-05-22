@@ -1,4 +1,4 @@
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,19 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-resource "juju_application" "cephfs-server-proxy" {
-  name       = var.app_name
-  model_uuid = var.model_uuid
-
-  charm {
-    name     = "cephfs-server-proxy"
-    base     = var.base
-    channel  = var.channel
-    revision = var.revision
-  }
-
-  config      = var.config
-  constraints = var.constraints
-  machines    = var.machines
-  units       = var.units
-}
+provider "juju" {}
