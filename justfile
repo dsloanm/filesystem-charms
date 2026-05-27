@@ -39,6 +39,22 @@ upgrade:
 repo *args: lock
     {{uv_run}} repository.py {{args}}
 
+# Run only Lustre integration tests
+integration-lustre *args: lock
+    #!/usr/bin/env bash
+    set -euxo pipefail
+
+    #{{uv_run}} repository.py build lustre
+    #mv _build/lustre.charm charms/lustre/
+    cd charms/lustre/
+    uv run pytest \
+        -v \
+        --tb native \
+        -s \
+        --log-cli-level=INFO \
+        {{args}} \
+        "tests/integration"
+
 # Show available recipes
 help:
     @just --list --unsorted
