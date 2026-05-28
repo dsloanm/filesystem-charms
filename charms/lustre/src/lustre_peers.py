@@ -51,7 +51,7 @@ class LustrePeers(ops.Object):
         """Publish this unit as the MGS if no MGS has been assigned yet."""
         rel = self.model.get_relation(PEER_RELATION)
         if rel is None:
-            # Peer relation not yet created; nothing to do.
+            logger.warning("peer relation not established. cannot publish MGS NID")
             return
 
         # First application leader writes its unit name and MGS NID to app databag.
@@ -60,7 +60,7 @@ class LustrePeers(ops.Object):
         existing = rel.load(LustrePeersAppData, rel.app)
         if existing.mgs_unit_name:
             logger.info(
-                "MGS already assigned to %s; skipping NID publication",
+                "MGS already active on %s. skipping NID publication",
                 existing.mgs_unit_name,
             )
             return
@@ -73,7 +73,7 @@ class LustrePeers(ops.Object):
         data = event.relation.load(LustrePeersAppData, event.relation.app)
 
         if data.mgs_unit_name is None or self.model.unit.name == data.mgs_unit_name:
-            # Ensure OSS service is not enabled on the MGS+MDS unit
+            # Ensure OSS service is not enabled on this MGS+MDS unit
             return
 
         if data.mgs_nid is None:
@@ -83,19 +83,23 @@ class LustrePeers(ops.Object):
         logger.info(
             "MGS is unit %s, NID %s. Setting up this unit as OSS", data.mgs_unit_name, data.mgs_nid
         )
+
         # TODO: Temporarily using fixed image files for testing
-        pool = "ostpool"
+        # zpools and OSTs are 1:1, temporarily use one image file per OST. TODO confirm appropriate
+        # number of disks per vdev (also vdev type - likely RAIDZ2), vdevs per pool, and pools per OSS.
+        # https://wiki.lustre.org/ZFS_System_Design
         for ost_id in range(2):
             ost = Path(f"/root/ost{ost_id}.img")
-            subprocess.run(["truncate", "-s", "10G", str(ost)], check=True)
+            subprocess.run(["truncate", "-s", "1G", str(ost)], check=True)
 
+            pool = f"ostpool{ost_id}"
             dataset = f"ost{ost_id}"
             lustre_fs.create_target(
                 pool,
                 dataset,
                 ost,
-                "10240",
-                "10G",
+                "1024000", # 1GB in KB
+                "1G",
                 ost_id,
                 mkfs_flags=["--ost", f"--mgsnode={data.mgs_nid}"],
             )

@@ -72,11 +72,11 @@ class LustreCharm(ops.CharmBase):
         pool = "mgsmdtpool"
         dataset = "mgsmdt"
         mgs_mdt_image = Path("/root/mgs_mdt.img")
-        subprocess.run(["truncate", "-s", "5G", mgs_mdt_image], check=True)
+        subprocess.run(["truncate", "-s", "1G", mgs_mdt_image], check=True)
 
         try:
             lustre_fs.create_target(
-                pool, dataset, mgs_mdt_image, "5120", "4G", 0, mkfs_flags=["--mgs", "--mdt"]
+                pool, dataset, mgs_mdt_image, "1024000", "1G", 0, mkfs_flags=["--mgs", "--mdt"]
             )
             lustre_fs.mount(pool, dataset, Path("/mnt/mgs_mdt"))
         except subprocess.CalledProcessError as e:

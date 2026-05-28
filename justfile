@@ -44,8 +44,8 @@ integration-lustre *args: lock
     #!/usr/bin/env bash
     set -euxo pipefail
 
-    #{{uv_run}} repository.py build lustre
-    #mv _build/lustre.charm charms/lustre/
+    {{uv_run}} repository.py build lustre
+    mv _build/lustre.charm charms/lustre/
     cd charms/lustre/
     uv run pytest \
         -v \
