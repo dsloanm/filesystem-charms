@@ -60,6 +60,7 @@ class LustreCharm(ops.CharmBase):
 
         if self.model.unit.name != mgs_unit:
             # OSS units wait for signal from the MGS before proceeding with their own setup.
+            # TODO: OSSes will become stuck here if they restart after initial deployment.
             self.unit.status = ops.WaitingStatus(f"Waiting for MGS unit {mgs_unit} to be ready")
             return
 

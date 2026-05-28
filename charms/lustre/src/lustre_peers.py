@@ -88,19 +88,25 @@ class LustrePeers(ops.Object):
         # zpools and OSTs are 1:1, temporarily use one image file per OST. TODO confirm appropriate
         # number of disks per vdev (also vdev type - likely RAIDZ2), vdevs per pool, and pools per OSS.
         # https://wiki.lustre.org/ZFS_System_Design
-        for ost_id in range(2):
-            ost = Path(f"/root/ost{ost_id}.img")
+        for ost_num in range(2):
+            # Temporarily derive OST index from unit name and a fixed stride.
+            # Not robust. Should be replaced with a more reliable method for assigning indices
+            max_osts_per_oss = 20
+            unit_num = int(self.model.unit.name.split("/")[1])
+            ost_index = unit_num * max_osts_per_oss + ost_num
+
+            ost = Path(f"/root/ost{ost_index}.img")
             subprocess.run(["truncate", "-s", "1G", str(ost)], check=True)
 
-            pool = f"ostpool{ost_id}"
-            dataset = f"ost{ost_id}"
+            pool = f"ostpool{ost_index}"
+            dataset = f"ost{ost_index}"
             lustre_fs.create_target(
                 pool,
                 dataset,
                 ost,
                 "1024000", # 1GB in KB
                 "1G",
-                ost_id,
+                ost_index,
                 mkfs_flags=["--ost", f"--mgsnode={data.mgs_nid}"],
             )
             lustre_fs.mount(pool, dataset, Path(f"/mnt/{dataset}"))
