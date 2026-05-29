@@ -91,7 +91,7 @@ class LustrePeers(ops.Object):
         for ost_num in range(2):
             # Temporarily derive OST index from unit name and a fixed stride.
             # Not robust. Should be replaced with a more reliable method for assigning indices
-            max_osts_per_oss = 20
+            max_osts_per_oss = 100
             unit_num = int(self.model.unit.name.split("/")[1])
             ost_index = unit_num * max_osts_per_oss + ost_num
 
