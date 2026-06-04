@@ -25,7 +25,6 @@ class LustreCharm(ops.CharmBase):
         super().__init__(framework)
         self.peers = LustrePeers(self)
         framework.observe(self.on.install, self._on_install)
-        framework.observe(self.on.leader_elected, self._on_leader_elected)
         framework.observe(self.on.start, self._on_start)
 
     def _on_install(self, event: ops.InstallEvent):
@@ -47,46 +46,33 @@ class LustreCharm(ops.CharmBase):
         lustre_fs.init()
         self.unit.status = ops.ActiveStatus()
 
-    def _on_leader_elected(self, event: ops.LeaderElectedEvent) -> None:
-        """Handle new leader election."""
-        self.peers.publish_mgs_nid()
-
     def _on_start(self, event: ops.StartEvent):
         """Set up Lustre services."""
         mgs_unit = self.peers.mgs_unit_name
-        if mgs_unit is None:
-            self.unit.status = ops.WaitingStatus("Waiting for MGS unit")
-            return
-
-        if self.model.unit.name != mgs_unit:
-            # OSS units wait for signal from the MGS before proceeding with their own setup.
-            # TODO: OSSes will become stuck here if they restart after initial deployment.
-            self.unit.status = ops.WaitingStatus(f"Waiting for MGS unit {mgs_unit} to be ready")
-            return
-
         mgs_nid = self.peers.mgs_nid
-        if mgs_nid is None:
-            self.unit.status = ops.WaitingStatus("Waiting for MGS NID")
+
+        if mgs_unit is None or mgs_nid is None:
+            # No MGS has been published yet. This is initial deployment.
+            if self.unit.is_leader():
+                # Initial leader is MGS+MDS for lifetime of deployment.
+                lustre_fs.ensure_mgs_mds_setup()
+                self.peers.ensure_mgs_nid_published()
+                self.unit.status = ops.ActiveStatus("MGS+MDS ready")
+            else:
+                # Initial non-leaders are OSSes. Must wait for the leader to publish MGS info in the
+                # peer relation before setting up OSS.
+                self.unit.status = ops.WaitingStatus("Waiting for MGS unit")
             return
 
-        # TODO: Temporarily using fixed image files and constants for testing
-        pool = "mgsmdtpool"
-        dataset = "mgsmdt"
-        mgs_mdt_image = Path("/root/mgs_mdt.img")
-        subprocess.run(["truncate", "-s", "1G", mgs_mdt_image], check=True)
-
-        try:
-            lustre_fs.create_target(
-                pool, dataset, mgs_mdt_image, "1024000", "1G", 0, mkfs_flags=["--mgs", "--mdt"]
-            )
-            lustre_fs.mount(pool, dataset, Path("/mnt/mgs_mdt"))
-        except subprocess.CalledProcessError as e:
-            logger.error("Lustre setup failed: %s", e)
-            cmd_str = " ".join(e.cmd) if isinstance(e.cmd, list) else str(e.cmd)
-            self.unit.status = ops.BlockedStatus(f"Lustre setup failed: {cmd_str}")
-            return
-
-        self.unit.status = ops.ActiveStatus("MGS+MDS ready")
+        # MGS is already published. This is a restart or a slow OSS initial deployment.
+        if self.model.unit.name == mgs_unit:
+            # This unit is the MGS. Ensure MGS+MDS are up.
+            lustre_fs.ensure_mgs_mds_setup()
+            self.unit.status = ops.ActiveStatus("MGS+MDS ready")
+        else:
+            # This is an OSS unit. Ensure OSS is up.
+            lustre_fs.ensure_oss_setup(self.model.unit.name, mgs_nid)
+            self.unit.status = ops.ActiveStatus("OSS ready")
 
 
 if __name__ == "__main__":  # pragma: nocover

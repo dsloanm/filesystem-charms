@@ -18,39 +18,120 @@ def init() -> None:
     if subprocess.run(["lctl", "network", "up"], capture_output=True).returncode != 0:
         subprocess.run(["lnetctl", "lnet", "configure"], check=True)
 
+def ensure_mgs_mds_setup() -> None:
+    """Set up the MGT and MDT on this unit. Idempotent."""
+    pool = "lustrefs-mgsmdt0-pool"
+    dataset = "mgsmdt0"
 
-def create_target(
+    logger.info(
+        "Ensuring this unit is running MGS+MDS on pool '%s' and dataset '%s'", pool, dataset
+    )
+
+    devices = _detect_devices()
+    _ensure_mgt_mdt_zpool(pool, devices)
+    _ensure_target(pool, dataset, 0, mkfs_flags=["--mgs", "--mdt"])
+    _ensure_mount(pool, dataset, Path("/mnt/mgs_mdt"))
+
+    logger.info("MGS+MDS on pool '%s' and dataset '%s' ready", pool, dataset)
+
+def ensure_oss_setup(unit_name: str, mgs_nid: str) -> None:
+    """Set up an OSS on this unit. Idempotent."""
+    # Derive OST index from unit name and a fixed stride.
+    # TODO confirm appropriate number of disks per vdev, vdev type(s) (mirror/RAIDZ2), vdevs per
+    # pool, and pools per OSS (zpools and OSTs are 1:1). See:
+    # https://wiki.lustre.org/ZFS_System_Design
+    max_osts_per_oss = 100
+    unit_num = int(unit_name.split("/")[1])
+    ost_index = unit_num * max_osts_per_oss  # + ost_num
+
+    pool = f"lustrefs-ost{ost_index}-pool"
+    dataset = f"ost{ost_index}"
+
+    logger.info(
+        "Ensuring this unit is running OSS on pool '%s' and dataset '%s' witn MGS NID: '%s'", pool, dataset, mgs_nid
+    )
+
+    devices = _detect_devices()
+    _ensure_ost_zpool(pool, devices)
+    _ensure_target(pool, dataset, ost_index, mkfs_flags=["--ost", f"--mgsnode={mgs_nid}"])
+    _ensure_mount(pool, dataset, Path(f"/mnt/{dataset}"))
+
+    logger.info("OST index '%s' for MGS NID '%s' ready", ost_index, mgs_nid)
+
+def _detect_devices() -> list[str]:
+    """Detect available block devices for use in pools. Placeholder for actual device detection logic."""
+    # TODO: For MVP, return a list of image files as block devices.
+    devices = []
+    for num in range(4):
+        image = Path(f"/root/disk{num}.img")
+        if not image.exists():
+            subprocess.run(["truncate", "-s", "1G", image], check=True)
+        devices.append(str(image))
+
+    return devices
+
+def _ensure_mgt_mdt_zpool(pool: str, devices: list[str]) -> None:
+    """Creates a zpool composed of mirror vdevs for the MGT and MDT. Idempotent."""
+    if _pool_exists(pool):
+        logger.info("ZFS pool '%s' already exists. Skipping creation.", pool)
+        return
+
+    if len(devices) < 2:
+        raise ValueError("MGT/MDT mirror pool requires at least 2 devices.")
+    if len(devices) % 2 != 0:
+        raise ValueError("MGT/MDT mirror pool requires an even number of devices for mirroring.")
+
+    cmd = ["zpool", "create", "-O", "canmount=off", pool]
+
+    # Break devices into mirror pairs. Example: ["/dev/sda", "/dev/sdb", "/dev/sdc", "/dev/sdd"]
+    # becomes ["mirror", "/dev/sda", "/dev/sdb", "mirror", "/dev/sdc", "/dev/sdd"]
+    for i in range(0, len(devices), 2):
+        pair = devices[i:i+2]
+        cmd.extend(["mirror", pair[0], pair[1]])
+
+    logger.info("Creating MDT zpool with command: %s", " ".join(cmd))
+    subprocess.run(cmd, check=True)
+
+def _ensure_ost_zpool(pool: str, devices: list[str]) -> None:
+    """Creates a zpool composed of a RAIDZ2 vdev for OSTs. Idempotent."""
+    if _pool_exists(pool):
+        logger.info("ZFS pool '%s' already exists. Skipping creation.", pool)
+        return
+
+    if len(devices) < 3:
+        raise ValueError("OST pool requires at least 3 devices for RAIDZ2.")
+
+    cmd = ["zpool", "create", "-O", "canmount=off", pool, "raidz2"] + devices
+
+    logger.info("Creating OST zpool with command: %s", " ".join(cmd))
+    subprocess.run(cmd, check=True)
+
+def _ensure_target(
     pool: str,
     dataset: str,
-    device: Path,
-    device_size: str,
-    quota: str,
     index: int,
     mkfs_flags: list[str],
     fsname: str = "lustrefs",
-    backfstype: str = "zfs",
 ) -> None:
-    """Format a Lustre ZFS target. Idempotent."""
+    """Format a Lustre target on top of an existing ZFS pool. Idempotent."""
     full_dataset_name = f"{pool}/{dataset}"
 
     if subprocess.run(["zfs", "list", full_dataset_name], capture_output=True).returncode == 0:
         logger.info("Dataset %s already exists, skipping creation", full_dataset_name)
         return
 
-    logger.info("Creating Lustre target on device: %s, dataset: %s", device, full_dataset_name)
+    logger.info("Formatting Lustre target: %s", full_dataset_name)
 
     flags = [
         *mkfs_flags,
-        f"--backfstype={backfstype}",
+        "--backfstype=zfs",
         f"--fsname={fsname}",
-        f"--device-size={device_size}",
         f"--index={index}",
     ]
-    subprocess.run(["mkfs.lustre", *flags, full_dataset_name, str(device)], check=True)
-    subprocess.run(["zfs", "set", f"quota={quota}", full_dataset_name], check=True)
+    subprocess.run(["mkfs.lustre", *flags, full_dataset_name], check=True)
+    #subprocess.run(["zfs", "set", f"quota={quota}", full_dataset_name], check=True)
 
-
-def mount(pool: str, dataset: str, mountpoint: Path) -> None:
+def _ensure_mount(pool: str, dataset: str, mountpoint: Path) -> None:
     """Mount a ZFS Lustre target at mountpoint. Idempotent."""
     if mountpoint.is_mount():
         logger.info("%s already mounted, skipping mount attempt", mountpoint)
@@ -60,3 +141,7 @@ def mount(pool: str, dataset: str, mountpoint: Path) -> None:
     mountpoint.mkdir(parents=True, exist_ok=True)
     logger.info("Mounting %s at %s", full_dataset_name, mountpoint)
     subprocess.run(["mount", "-t", "lustre", full_dataset_name, str(mountpoint)], check=True)
+
+def _pool_exists(pool: str) -> bool:
+    """Return True if a zpool with the given name already exists, False otherwise."""
+    return subprocess.run(["zpool", "list", pool], capture_output=True).returncode == 0

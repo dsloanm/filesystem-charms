@@ -85,10 +85,11 @@ def _disable_secureboot(model: str):
 
 @pytest.fixture(scope="module")
 def lustre_cluster(charm: Path, juju: jubilant.Juju):
-    """Deploy a 2-unit Lustre cluster and filesystem-client, then integrate.
+    """Deploy a 3-unit Lustre cluster and filesystem-client, then integrate.
 
     lustre/0 (leader)   → MGS + MDS
-    lustre/1            → OSS with 2 OSTs
+    lustre/1            → OSS + OST
+    lustre/2            → OSS + OST
     filesystem-client/0 → client node that mounts Lustre at /mnt/lustre
 
     All tests that need the cluster deployed should request this fixture.
@@ -101,7 +102,7 @@ def lustre_cluster(charm: Path, juju: jubilant.Juju):
     juju.deploy(
         charm.resolve(),
         app=LUSTRE_APP,
-        num_units=2,
+        num_units=3,
         resources={"lustre-packages": "lustre-packages.tar.gz"},
         constraints={"virt-type": "virtual-machine"},
     )
@@ -168,19 +169,19 @@ def test_leader_runs_mgs_mds(lustre_cluster, juju: jubilant.Juju):
     assert "MDT" in result.stdout, f"MDT not found in device list on leader {leader}"
 
 
-def test_nonleader_runs_oss_with_two_osds(lustre_cluster, juju: jubilant.Juju):
-    """Non-leader unit hosts the OSS and exposes exactly 2 OSDs."""
+def test_nonleader_runs_oss(lustre_cluster, juju: jubilant.Juju):
+    """Non-leader units host the OSSes and expose 1 OST each (2 total)."""
     nonleaders = _nonleader_units(juju)
     assert nonleaders, "Expected at least one non-leader unit"
-    oss_unit = nonleaders[0]
 
-    result = juju.exec("lctl dl", unit=oss_unit)
-    assert result.return_code == 0, f"lctl dl failed on {oss_unit}: {result.stderr}"
+    for oss_unit in nonleaders:
+        result = juju.exec("lctl dl", unit=oss_unit)
+        assert result.return_code == 0, f"lctl dl failed on {oss_unit}: {result.stderr}"
 
-    osd_lines = [line for line in result.stdout.splitlines() if "osd-zfs" in line]
-    assert len(osd_lines) == 2, (
-        f"Expected 2 OSDs on {oss_unit}, got {len(osd_lines)}.\nlctl dl output:\n{result.stdout}"
-    )
+        osd_lines = [line for line in result.stdout.splitlines() if "osd-zfs" in line]
+        assert len(osd_lines) == 1, (
+            f"Expected 1 OSD on {oss_unit}, got {len(osd_lines)}.\nlctl dl output:\n{result.stdout}"
+        )
 
 
 # ---------------------------------------------------------------------------
