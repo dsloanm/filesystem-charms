@@ -6,6 +6,7 @@ dependencies = [
     "ops ~= 3.0",
     "charmlibs-apt ~= 1.0",
     "charmed-hpc-libs[ops] ~= 0.1",
+    "pydantic>=2",
 ]
 
 [project.optional-dependencies]

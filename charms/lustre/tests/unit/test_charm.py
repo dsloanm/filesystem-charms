@@ -3,6 +3,8 @@
 #
 # To learn more about testing, see https://documentation.ubuntu.com/ops/latest/explanation/testing/
 
+"""Lustre charm unit tests."""
+
 import pytest
 
 

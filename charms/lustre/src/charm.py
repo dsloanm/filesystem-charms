@@ -5,14 +5,14 @@
 """Charm for the Lustre file system."""
 
 import logging
-import subprocess
-from pathlib import Path
+import platform
+from subprocess import CalledProcessError
 
-import ops
-
-import kernel_pin
 import lustre_fs
-import lustre_packages
+import ops
+from charmed_hpc_libs.ops import StopCharm, refresh
+from charmlibs import apt
+from constants import LUSTRE_REPOSITORY_KEY, LUSTRE_REPOSITORY_URI
 from lustre_peers import LustrePeers
 
 logger = logging.getLogger(__name__)
@@ -27,27 +27,58 @@ class LustreCharm(ops.CharmBase):
         framework.observe(self.on.install, self._on_install)
         framework.observe(self.on.start, self._on_start)
 
+    @refresh()
     def _on_install(self, event: ops.InstallEvent):
         """Install Lustre packages."""
-        # TODO: Temporarily pin kernel version and install Lustre packages from a resource tarball
-        # until DKMS-based Lustre packages are available.
-        if not kernel_pin.ensure_required_kernel(self.unit):
-            return
-
         self.unit.status = ops.MaintenanceStatus("Installing Lustre packages")
-        # zfsutils-linux is needed but is not an explicit dependency of the Lustre debs
-        subprocess.run(["apt-get", "install", "-y", "zfsutils-linux"], check=True)
 
-        resource_path = Path(self.model.resources.fetch("lustre-packages"))
-        logger.info("Fetched lustre-packages resource at: %s", resource_path)
-        if not lustre_packages.install_from_resource(self.unit, resource_path):
-            return
+        # Lustre packages are not in the Ubuntu archive. Add an external repository.
+        try:
+            release = platform.freedesktop_os_release()["VERSION_CODENAME"]
+        except KeyError as e:
+            msg = "failed to determine Ubuntu version codename to configure Lustre repository"
+            logger.error(msg + ": %s", e)
+            raise StopCharm(ops.BlockedStatus(msg.capitalize()))
+
+        try:
+            repo = apt.DebianRepository(
+                enabled=True,
+                repotype="deb",
+                uri=LUSTRE_REPOSITORY_URI,
+                release=release,
+                groups=["main"],
+                filename="lustre-repo",
+            )
+            repo.import_key(LUSTRE_REPOSITORY_KEY)
+            repositories = apt.RepositoryMapping()
+            repositories.add(repo)
+            apt.update()
+        except (apt.GPGKeyError, CalledProcessError) as e:
+            msg = f"failed to add {LUSTRE_REPOSITORY_URI} package repository"
+            logger.error(msg + ": %s", e)
+            raise StopCharm(ops.BlockedStatus(msg.capitalize()))
+
+        # ZFS packages are needed but are not an explicit dependency of the Lustre debs.
+        # FIXME: `zfs-dkms` must be installed first to ensure development headers are present for
+        # the Lustre DKMS modules to build without "Error!  Build of osd_zfs.ko failed".
+        for install_packages in (
+            ["zfs-dkms", "zfsutils-linux"],
+            ["lustre-server-modules-dkms", "lustre-server-utils"],
+        ):
+            try:
+                apt.add_package(install_packages)
+            except (apt.PackageNotFoundError, apt.PackageError) as e:
+                msg = f"failed to install packages {install_packages}"
+                logger.error(msg + ": %s", e)
+                raise StopCharm(ops.BlockedStatus(msg.capitalize()))
 
         lustre_fs.init()
-        self.unit.status = ops.ActiveStatus()
+        self.unit.status = ops.MaintenanceStatus("Lustre packages installed")
 
     def _on_start(self, event: ops.StartEvent):
         """Set up Lustre services."""
+        self.unit.status = ops.MaintenanceStatus("Starting Lustre services")
+
         mgs_unit = self.peers.mgs_unit_name
         mgs_nid = self.peers.mgs_nid
 

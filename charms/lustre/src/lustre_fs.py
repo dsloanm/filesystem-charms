@@ -4,26 +4,38 @@
 
 """Lustre filesystem operations."""
 
+import json
 import logging
 import subprocess
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 
 def init() -> None:
-    """Load Lustre kernel modules and bring up LNet."""
+    """Load Lustre kernel modules and bring up LNet. Idempotent."""
+    # This is idempotent. "modprobe will succeed (and do nothing) if told to insert a module which
+    # is already present" - https://man7.org/linux/man-pages/man8/modprobe.8.html
     subprocess.run(["modprobe", "lustre"], check=True)
-    # Skip lnetctl configure if LNet already up. Avoids errors on subsequent calls.
-    if subprocess.run(["lctl", "network", "up"], capture_output=True).returncode != 0:
-        subprocess.run(["lnetctl", "lnet", "configure"], check=True)
+
+    # Enable LNet on default network interface if not already enabled.
+    interface = _get_default_interface()
+    # TODO: Add InfiniBand support. MVP is scoped to TCP for now.
+    if not _nid_exists(f"{interface}@tcp"):
+        subprocess.run(["lnetctl", "net", "add", "--net", "tcp", "--if", interface], check=True)
+        # Persist changes.
+        result = subprocess.run(
+            ["lnetctl", "export", "--backup"], capture_output=True, text=True, check=True
+        )
+        Path("/etc/lnet.conf").write_text(result.stdout)
+
 
 def ensure_mgs_mds_setup() -> None:
     """Set up the MGT and MDT on this unit. Idempotent."""
     pool = "lustrefs-mgsmdt0-pool"
     dataset = "mgsmdt0"
 
-    logger.info(
+    _logger.info(
         "Ensuring this unit is running MGS+MDS on pool '%s' and dataset '%s'", pool, dataset
     )
 
@@ -32,7 +44,8 @@ def ensure_mgs_mds_setup() -> None:
     _ensure_target(pool, dataset, 0, mkfs_flags=["--mgs", "--mdt"])
     _ensure_mount(pool, dataset, Path("/mnt/mgs_mdt"))
 
-    logger.info("MGS+MDS on pool '%s' and dataset '%s' ready", pool, dataset)
+    _logger.info("MGS+MDS on pool '%s' and dataset '%s' ready", pool, dataset)
+
 
 def ensure_oss_setup(unit_name: str, mgs_nid: str) -> None:
     """Set up an OSS on this unit. Idempotent."""
@@ -47,8 +60,11 @@ def ensure_oss_setup(unit_name: str, mgs_nid: str) -> None:
     pool = f"lustrefs-ost{ost_index}-pool"
     dataset = f"ost{ost_index}"
 
-    logger.info(
-        "Ensuring this unit is running OSS on pool '%s' and dataset '%s' witn MGS NID: '%s'", pool, dataset, mgs_nid
+    _logger.info(
+        "Ensuring this unit is running OSS on pool '%s' and dataset '%s' with MGS NID: '%s'",
+        pool,
+        dataset,
+        mgs_nid,
     )
 
     devices = _detect_devices()
@@ -56,11 +72,12 @@ def ensure_oss_setup(unit_name: str, mgs_nid: str) -> None:
     _ensure_target(pool, dataset, ost_index, mkfs_flags=["--ost", f"--mgsnode={mgs_nid}"])
     _ensure_mount(pool, dataset, Path(f"/mnt/{dataset}"))
 
-    logger.info("OST index '%s' for MGS NID '%s' ready", ost_index, mgs_nid)
+    _logger.info("OST index '%s' for MGS NID '%s' ready", ost_index, mgs_nid)
+
 
 def _detect_devices() -> list[str]:
     """Detect available block devices for use in pools. Placeholder for actual device detection logic."""
-    # TODO: For MVP, return a list of image files as block devices.
+    # TODO: For MVP, return a fixed list of image files as block devices.
     devices = []
     for num in range(4):
         image = Path(f"/root/disk{num}.img")
@@ -70,10 +87,11 @@ def _detect_devices() -> list[str]:
 
     return devices
 
+
 def _ensure_mgt_mdt_zpool(pool: str, devices: list[str]) -> None:
-    """Creates a zpool composed of mirror vdevs for the MGT and MDT. Idempotent."""
+    """Create a zpool composed of mirror vdevs for the MGT and MDT. Idempotent."""
     if _pool_exists(pool):
-        logger.info("ZFS pool '%s' already exists. Skipping creation.", pool)
+        _logger.info("ZFS pool '%s' already exists. Skipping creation.", pool)
         return
 
     if len(devices) < 2:
@@ -86,16 +104,17 @@ def _ensure_mgt_mdt_zpool(pool: str, devices: list[str]) -> None:
     # Break devices into mirror pairs. Example: ["/dev/sda", "/dev/sdb", "/dev/sdc", "/dev/sdd"]
     # becomes ["mirror", "/dev/sda", "/dev/sdb", "mirror", "/dev/sdc", "/dev/sdd"]
     for i in range(0, len(devices), 2):
-        pair = devices[i:i+2]
+        pair = devices[i : i + 2]
         cmd.extend(["mirror", pair[0], pair[1]])
 
-    logger.info("Creating MDT zpool with command: %s", " ".join(cmd))
+    _logger.info("Creating MDT zpool with command: %s", " ".join(cmd))
     subprocess.run(cmd, check=True)
 
+
 def _ensure_ost_zpool(pool: str, devices: list[str]) -> None:
-    """Creates a zpool composed of a RAIDZ2 vdev for OSTs. Idempotent."""
+    """Create a zpool composed of a RAIDZ2 vdev for OSTs. Idempotent."""
     if _pool_exists(pool):
-        logger.info("ZFS pool '%s' already exists. Skipping creation.", pool)
+        _logger.info("ZFS pool '%s' already exists. Skipping creation.", pool)
         return
 
     if len(devices) < 3:
@@ -103,8 +122,9 @@ def _ensure_ost_zpool(pool: str, devices: list[str]) -> None:
 
     cmd = ["zpool", "create", "-O", "canmount=off", pool, "raidz2"] + devices
 
-    logger.info("Creating OST zpool with command: %s", " ".join(cmd))
+    _logger.info("Creating OST zpool with command: %s", " ".join(cmd))
     subprocess.run(cmd, check=True)
+
 
 def _ensure_target(
     pool: str,
@@ -117,10 +137,10 @@ def _ensure_target(
     full_dataset_name = f"{pool}/{dataset}"
 
     if subprocess.run(["zfs", "list", full_dataset_name], capture_output=True).returncode == 0:
-        logger.info("Dataset %s already exists, skipping creation", full_dataset_name)
+        _logger.info("Dataset %s already exists, skipping creation", full_dataset_name)
         return
 
-    logger.info("Formatting Lustre target: %s", full_dataset_name)
+    _logger.info("Formatting Lustre target: %s", full_dataset_name)
 
     flags = [
         *mkfs_flags,
@@ -129,18 +149,34 @@ def _ensure_target(
         f"--index={index}",
     ]
     subprocess.run(["mkfs.lustre", *flags, full_dataset_name], check=True)
-    #subprocess.run(["zfs", "set", f"quota={quota}", full_dataset_name], check=True)
+
 
 def _ensure_mount(pool: str, dataset: str, mountpoint: Path) -> None:
     """Mount a ZFS Lustre target at mountpoint. Idempotent."""
     if mountpoint.is_mount():
-        logger.info("%s already mounted, skipping mount attempt", mountpoint)
+        _logger.info("%s already mounted, skipping mount attempt", mountpoint)
         return
 
     full_dataset_name = f"{pool}/{dataset}"
     mountpoint.mkdir(parents=True, exist_ok=True)
-    logger.info("Mounting %s at %s", full_dataset_name, mountpoint)
+    _logger.info("Mounting %s at %s", full_dataset_name, mountpoint)
     subprocess.run(["mount", "-t", "lustre", full_dataset_name, str(mountpoint)], check=True)
+
+
+def _get_default_interface():
+    """Return the default network interface name for this unit."""
+    result = subprocess.run(
+        ["ip", "-json", "route", "show", "default"], capture_output=True, text=True, check=True
+    )
+    routes = json.loads(result.stdout)
+    return routes[0]["dev"]
+
+
+def _nid_exists(nid):
+    result = subprocess.run(["lctl", "list_nids"], capture_output=True, text=True, check=True)
+    configured_nids = [line for line in result.stdout.splitlines() if line]
+    return nid in configured_nids
+
 
 def _pool_exists(pool: str) -> bool:
     """Return True if a zpool with the given name already exists, False otherwise."""

@@ -4,6 +4,8 @@
 # The integration tests use the Jubilant library. See https://documentation.ubuntu.com/jubilant/
 # To learn more about testing, see https://documentation.ubuntu.com/ops/latest/explanation/testing/
 
+"""Lustre charm integration test configuration."""
+
 import logging
 import os
 import pathlib
@@ -50,6 +52,7 @@ def charm():
 
 
 def pytest_addoption(parser) -> None:
+    """Add command-line options to control test behavior."""
     parser.addoption(
         "--keep-models",
         action="store_true",

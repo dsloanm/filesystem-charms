@@ -5,15 +5,12 @@
 """Peer relation observer for the Lustre charm."""
 
 import logging
-import subprocess
-from pathlib import Path
 
+import lustre_fs
 import ops
 import pydantic
 
-import lustre_fs
-
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 PEER_RELATION = "lustre-peers"
 
@@ -59,7 +56,7 @@ class LustrePeers(ops.Object):
         """Publish this unit as the MGS if no MGS has been assigned yet."""
         rel = self.model.get_relation(PEER_RELATION)
         if rel is None:
-            logger.warning("peer relation not established. cannot publish MGS NID")
+            _logger.warning("peer relation not established. cannot publish MGS NID")
             return
 
         # First application leader writes its unit name and MGS NID to app databag.
@@ -67,7 +64,7 @@ class LustrePeers(ops.Object):
         # Never overwrite. The original MGS unit must remain stable across leader re-elections.
         existing = rel.load(LustrePeersAppData, rel.app)
         if existing.mgs_unit_name:
-            logger.info(
+            _logger.info(
                 "MGS already active on %s. skipping NID publication",
                 existing.mgs_unit_name,
             )
@@ -77,13 +74,13 @@ class LustrePeers(ops.Object):
         mgs_nid = str(self.model.get_binding(PEER_RELATION).network.bind_address) + "@tcp"
         rel.save(LustrePeersAppData(mgs_nid=mgs_nid, mgs_unit_name=self.model.unit.name), rel.app)
 
-        logger.info("Published MGS NID %s for unit %s", mgs_nid, self.model.unit.name)
+        _logger.info("Published MGS NID %s for unit %s", mgs_nid, self.model.unit.name)
 
     def _on_relation_changed(self, event: ops.RelationChangedEvent) -> None:
         data = event.relation.load(LustrePeersAppData, event.relation.app)
 
         if data.mgs_unit_name is None or data.mgs_nid is None:
-            logger.warning("MGS data not yet published. cannot configure Lustre services.")
+            _logger.warning("MGS data not yet published. cannot configure Lustre services.")
             self.model.unit.status = ops.WaitingStatus("Waiting for MGS unit to publish NID")
             return
 

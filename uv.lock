@@ -128,6 +128,7 @@ dependencies = [
     { name = "charmed-hpc-libs", extra = ["ops"] },
     { name = "charmlibs-apt" },
     { name = "ops" },
+    { name = "pydantic" },
 ]
 
 [package.optional-dependencies]
@@ -152,6 +153,7 @@ requires-dist = [
     { name = "jubilant", marker = "extra == 'dev'" },
     { name = "ops", specifier = "~=3.0" },
     { name = "ops", extras = ["testing"], marker = "extra == 'dev'" },
+    { name = "pydantic", specifier = ">=2" },
     { name = "pyright", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'dev'", specifier = "~=9.0" },
     { name = "pytest-order", marker = "extra == 'dev'", specifier = "~=1.1" },
@@ -186,14 +188,18 @@ name = "lustre"
 version = "0.0.1"
 source = { virtual = "charms/lustre" }
 dependencies = [
+    { name = "charmed-hpc-libs", extra = ["ops"] },
+    { name = "charmlibs-apt" },
     { name = "ops" },
     { name = "pydantic" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "ops", specifier = ">=3,<4" },
-    { name = "pydantic", specifier = ">=2" },
+    { name = "charmed-hpc-libs", extras = ["ops"] },
+    { name = "charmlibs-apt" },
+    { name = "ops" },
+    { name = "pydantic" },
 ]
 
 [[package]]
