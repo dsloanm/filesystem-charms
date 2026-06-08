@@ -9,10 +9,15 @@ import logging
 import lustre_fs
 import ops
 import pydantic
+from constants import LUSTRE_FSNAME
 
 _logger = logging.getLogger(__name__)
 
 PEER_RELATION = "lustre-peers"
+
+
+class LustrePeersError(Exception):
+    """Exception raised when a Lustre peer relation operation fails."""
 
 
 class LustrePeersAppData(pydantic.BaseModel):
@@ -34,50 +39,41 @@ class LustrePeers(ops.Object):
         self._charm = charm
         charm.framework.observe(charm.on.lustre_peers_relation_changed, self._on_relation_changed)
 
-    @property
-    def app_data(self) -> LustrePeersAppData:
-        """Return the data published by the leader to the peer relation databag."""
-        rel = self.model.get_relation(PEER_RELATION)
-        if rel is None:
-            raise RuntimeError("Peer relation not yet created")
-        return rel.load(LustrePeersAppData, rel.app) or LustrePeersAppData()
-
-    @property
-    def mgs_nid(self) -> str | None:
-        """Return the MGS NID published by the leader or `None`, if not available."""
-        return self.app_data.mgs_nid
-
-    @property
-    def mgs_unit_name(self) -> str | None:
-        """Return the MGS unit name published by the leader or `None`, if not available."""
-        return self.app_data.mgs_unit_name
-
     def ensure_mgs_nid_published(self) -> None:
         """Publish this unit as the MGS if no MGS has been assigned yet."""
-        rel = self.model.get_relation(PEER_RELATION)
-        if rel is None:
-            _logger.warning("peer relation not established. cannot publish MGS NID")
-            return
+        if not self.model.unit.is_leader():
+            raise LustrePeersError("Non-leader attempted to publish MGS NID")
 
-        # First application leader writes its unit name and MGS NID to app databag.
-        # Non-leader units read the NID from this data to configure themselves as OSS nodes.
         # Never overwrite. The original MGS unit must remain stable across leader re-elections.
-        existing = rel.load(LustrePeersAppData, rel.app)
-        if existing.mgs_unit_name:
+        data = self.get_app_data()
+        if data.mgs_unit_name and data.mgs_nid:
             _logger.info(
-                "MGS already active on %s. skipping NID publication",
-                existing.mgs_unit_name,
+                "MGS already active on %s with NID %s. skipping publication",
+                data.mgs_unit_name,
+                data.mgs_nid,
             )
             return
 
         # NID is <address>@<LND protocol><lnd#>. Example: "10.0.0.5@tcp"
         mgs_nid = str(self.model.get_binding(PEER_RELATION).network.bind_address) + "@tcp"
-        rel.save(LustrePeersAppData(mgs_nid=mgs_nid, mgs_unit_name=self.model.unit.name), rel.app)
+        data.mgs_nid = mgs_nid
+        data.mgs_unit_name = self.model.unit.name
 
-        _logger.info("Published MGS NID %s for unit %s", mgs_nid, self.model.unit.name)
+        self.set_app_data(data)
+        _logger.info("Published MGS NID %s for unit %s", data.mgs_nid, data.mgs_unit_name)
+
+    def get_app_data(self) -> LustrePeersAppData:
+        """Return the application data in the peer relation databag."""
+        rel = self._get_relation_checked()
+        return rel.load(LustrePeersAppData, rel.app) or LustrePeersAppData()
+
+    def set_app_data(self, data: LustrePeersAppData) -> None:
+        """Set the application data in the peer relation databag."""
+        rel = self._get_relation_checked()
+        rel.save(data, rel.app)
 
     def _on_relation_changed(self, event: ops.RelationChangedEvent) -> None:
-        data = event.relation.load(LustrePeersAppData, event.relation.app)
+        data = self.get_app_data()
 
         if data.mgs_unit_name is None or data.mgs_nid is None:
             _logger.warning("MGS data not yet published. cannot configure Lustre services.")
@@ -88,5 +84,12 @@ class LustrePeers(ops.Object):
             # OSS service must not be enabled on MGS+MDS unit
             return
 
-        lustre_fs.ensure_oss_setup(self.model.unit.name, data.mgs_nid)
+        lustre_fs.ensure_oss_setup(LUSTRE_FSNAME, self.model.unit.name, data.mgs_nid)
         self.model.unit.status = ops.ActiveStatus("OSS ready")
+
+    def _get_relation_checked(self) -> ops.Relation:
+        """Return the peer relation, ensuring it exists."""
+        rel = self.model.get_relation(PEER_RELATION)
+        if rel is None:
+            raise LustrePeersError("Peer relation not yet created")
+        return rel

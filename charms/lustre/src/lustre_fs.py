@@ -30,7 +30,7 @@ def init() -> None:
         Path("/etc/lnet.conf").write_text(result.stdout)
 
 
-def ensure_mgs_mds_setup() -> None:
+def ensure_mgs_mds_setup(fsname: str) -> None:
     """Set up the MGT and MDT on this unit. Idempotent."""
     pool = "lustrefs-mgsmdt0-pool"
     dataset = "mgsmdt0"
@@ -41,13 +41,13 @@ def ensure_mgs_mds_setup() -> None:
 
     devices = _detect_devices()
     _ensure_mgt_mdt_zpool(pool, devices)
-    _ensure_target(pool, dataset, 0, mkfs_flags=["--mgs", "--mdt"])
+    _ensure_target(fsname, pool, dataset, 0, mkfs_flags=["--mgs", "--mdt"])
     _ensure_mount(pool, dataset, Path("/mnt/mgs_mdt"))
 
     _logger.info("MGS+MDS on pool '%s' and dataset '%s' ready", pool, dataset)
 
 
-def ensure_oss_setup(unit_name: str, mgs_nid: str) -> None:
+def ensure_oss_setup(fsname: str, unit_name: str, mgs_nid: str) -> None:
     """Set up an OSS on this unit. Idempotent."""
     # Derive OST index from unit name and a fixed stride.
     # TODO confirm appropriate number of disks per vdev, vdev type(s) (mirror/RAIDZ2), vdevs per
@@ -69,7 +69,7 @@ def ensure_oss_setup(unit_name: str, mgs_nid: str) -> None:
 
     devices = _detect_devices()
     _ensure_ost_zpool(pool, devices)
-    _ensure_target(pool, dataset, ost_index, mkfs_flags=["--ost", f"--mgsnode={mgs_nid}"])
+    _ensure_target(fsname, pool, dataset, ost_index, mkfs_flags=["--ost", f"--mgsnode={mgs_nid}"])
     _ensure_mount(pool, dataset, Path(f"/mnt/{dataset}"))
 
     _logger.info("OST index '%s' for MGS NID '%s' ready", ost_index, mgs_nid)
@@ -107,7 +107,7 @@ def _ensure_mgt_mdt_zpool(pool: str, devices: list[str]) -> None:
         pair = devices[i : i + 2]
         cmd.extend(["mirror", pair[0], pair[1]])
 
-    _logger.info("Creating MDT zpool with command: %s", " ".join(cmd))
+    _logger.info("Creating MGT/MDT zpool with command: %s", " ".join(cmd))
     subprocess.run(cmd, check=True)
 
 
@@ -127,11 +127,11 @@ def _ensure_ost_zpool(pool: str, devices: list[str]) -> None:
 
 
 def _ensure_target(
+    fsname: str,
     pool: str,
     dataset: str,
     index: int,
     mkfs_flags: list[str],
-    fsname: str = "lustrefs",
 ) -> None:
     """Format a Lustre target on top of an existing ZFS pool. Idempotent."""
     full_dataset_name = f"{pool}/{dataset}"

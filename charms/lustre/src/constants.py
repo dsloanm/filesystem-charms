@@ -1,5 +1,7 @@
 """Constants used within the charm."""
 
+LUSTRE_FSNAME = "lustrefs"
+
 LUSTRE_REPOSITORY_KEY = """-----BEGIN PGP PUBLIC KEY BLOCK-----
 Comment: Hostname:
 Version: Hockeypuck 2.2
