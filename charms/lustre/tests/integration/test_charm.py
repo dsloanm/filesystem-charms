@@ -105,14 +105,13 @@ def lustre_cluster(charm: Path, juju: jubilant.Juju):
         charm.resolve(),
         app=LUSTRE_APP,
         num_units=3,
-        resources={"lustre-packages": "lustre-packages.tar.gz"},
         constraints={
             "virt-type": "virtual-machine",
             "cores": "4",
             "mem": "5G",
         },  # TODO: temp constraints for speeding up DKMS build
     )
-    juju.wait(jubilant.all_active, timeout=1800)
+    juju.wait(jubilant.all_active, error=jubilant.any_error, timeout=1800)
 
     # TODO: filesystem-client Integration does not exist yet. Temp use MGS node as client
     # juju.deploy(CLIENT_APP, app=CLIENT_APP, num_units=1)

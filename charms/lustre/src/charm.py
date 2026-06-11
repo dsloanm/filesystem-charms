@@ -10,12 +10,22 @@ from subprocess import CalledProcessError
 
 import lustre_fs
 import ops
-from charmed_hpc_libs.ops import StopCharm, refresh
+from charmed_hpc_libs.ops import refresh
 from charmlibs import apt
-from constants import LUSTRE_FSNAME, LUSTRE_REPOSITORY_KEY, LUSTRE_REPOSITORY_URI
-from lustre_peers import LustrePeers
+from charms.filesystem_client.v0.filesystem_info import FilesystemProvides, LustreInfo
+from constants import (
+    FILESYSTEM_PEER_RELATION,
+    FILESYSTEM_RELATION,
+    LUSTRE_FSNAME,
+    LUSTRE_REPOSITORY_KEY,
+    LUSTRE_REPOSITORY_URI,
+)
+from exceptions import LustreFilesystemError, LustrePeerError, LustreRepositoryError
+from lustre_peer import LustrePeer
+from state import check_lustre
 
 logger = logging.getLogger(__name__)
+refresh = refresh(hook=check_lustre)
 
 
 class LustreCharm(ops.CharmBase):
@@ -23,32 +33,48 @@ class LustreCharm(ops.CharmBase):
 
     def __init__(self, framework: ops.Framework):
         super().__init__(framework)
-        self.peers = LustrePeers(self)
+        self.peers = LustrePeer(self)
+        self.filesystem = FilesystemProvides(self, FILESYSTEM_RELATION, FILESYSTEM_PEER_RELATION)
         framework.observe(self.on.install, self._on_install)
         framework.observe(self.on.start, self._on_start)
         framework.observe(self.on.update_status, self._on_update_status)
 
-    @refresh()
-    def _on_install(self, event: ops.InstallEvent):
+    def _on_install(self, _: ops.InstallEvent):
         """Install Lustre packages."""
+        # Lustre packages are not in the Ubuntu archive. Add an external repository.
         self.unit.status = ops.MaintenanceStatus("Setting up package repository")
-        self._setup_lustre_repository()
-
-        # ZFS packages are needed but are not an explicit dependency of the Lustre debs.
-        # FIXME: `zfs-dkms` must be installed first to ensure development headers are present for
-        # the Lustre DKMS modules to build without "Error!  Build of osd_zfs.ko failed".
-        self.unit.status = ops.MaintenanceStatus("Installing ZFS packages")
-        self._install_packages(["zfs-dkms", "zfsutils-linux"])
+        try:
+            self._setup_lustre_repository()
+        except LustreRepositoryError as e:
+            msg = "Lustre repository setup failed"
+            logger.exception("%s: %s", msg, e)
+            self.unit.status = ops.BlockedStatus(msg)
+            return
 
         self.unit.status = ops.MaintenanceStatus("Installing Lustre packages")
-        self._install_packages(["lustre-server-modules-dkms", "lustre-server-utils"])
+        # zfsutils-linux is needed but is not an explicit dependency of the Lustre debs.
+        packages = ["lustre-server-modules-dkms", "lustre-server-utils", "zfsutils-linux"]
+        try:
+            apt.add_package(packages)
+        except (apt.PackageNotFoundError, apt.PackageError) as e:
+            msg = f"failed to install packages {packages}"
+            logger.exception(msg + ": %s", e)
+            self.unit.status = ops.BlockedStatus(msg.capitalize())
+            return
 
         self.unit.status = ops.MaintenanceStatus("Initializing modules and LNet")
-        lustre_fs.init()
+        try:
+            lustre_fs.init()
+        except LustreFilesystemError as e:
+            msg = "Lustre filesystem initialization failed"
+            logger.exception("%s: %s", msg, e)
+            self.unit.status = ops.BlockedStatus(msg)
+            return
 
         self.unit.status = ops.MaintenanceStatus("Preparing to start Lustre services")
 
-    def _on_start(self, event: ops.StartEvent):
+    @refresh
+    def _on_start(self, _: ops.StartEvent):
         """Set up Lustre services."""
         self.unit.status = ops.MaintenanceStatus("Starting Lustre services")
 
@@ -60,48 +86,44 @@ class LustreCharm(ops.CharmBase):
             # No MGS has been published yet. This is initial deployment.
             if self.unit.is_leader():
                 # Initial leader is MGS+MDS for lifetime of deployment.
-                lustre_fs.ensure_mgs_mds_setup(LUSTRE_FSNAME)
-                self.peers.ensure_mgs_nid_published()
-                self.unit.status = ops.ActiveStatus("MGS+MDS ready")
-            else:
-                # Initial non-leaders are OSSes. Must wait for the leader to publish MGS info in the
-                # peer relation before setting up OSS.
-                self.unit.status = ops.WaitingStatus("Waiting for MGS unit")
+                lustre_fs.mgs_mds_setup(LUSTRE_FSNAME)
+                self.peers.mgs_nid_published()
+
+                # Ensure info provided to filesystem interface matches the published MGS NID.
+                try:
+                    data = self.peers.get_app_data()
+                except LustrePeerError as e:
+                    msg = "failed to get peer relation data after publishing MGS NID"
+                    logger.exception("%s: %s", msg, e)
+                    self.unit.status = ops.BlockedStatus(msg.capitalize())
+                    return
+                lustre_info = LustreInfo(mgs_ids=[data.mgs_nid], fs_name=LUSTRE_FSNAME)
+                self.filesystem.set_info(lustre_info)
+
+            # Initial non-leaders are OSSes and must wait for the leader to publish MGS info in the
+            # peer relation before starting.
             return
 
         # MGS is already published. This is a restart or a slow OSS initial deployment.
         if self.model.unit.name == mgs_unit:
-            # This unit is the MGS. Ensure MGS+MDS are up.
-            lustre_fs.ensure_mgs_mds_setup(LUSTRE_FSNAME)
-            self.unit.status = ops.ActiveStatus("MGS+MDS ready")
+            lustre_fs.mgs_mds_setup(LUSTRE_FSNAME)
         else:
-            # This is an OSS unit. Ensure OSS is up.
-            lustre_fs.ensure_oss_setup(LUSTRE_FSNAME, self.model.unit.name, mgs_nid)
-            self.unit.status = ops.ActiveStatus("OSS ready")
+            # OSS can start immediately if MGS info is already available. No need to wait for a peer
+            # relation event.
+            lustre_fs.oss_setup(LUSTRE_FSNAME, self.model.unit.name, mgs_nid)
 
-    def _on_update_status(self, event: ops.UpdateStatusEvent) -> None:
+    @refresh
+    def _on_update_status(self, _: ops.UpdateStatusEvent) -> None:
         """Check the health of Lustre services and update unit status."""
-        # TODO: implement checks for Lustre modules, mount points, zpools, etc.
-        pass
-
-    def _install_packages(self, packages: list[str]) -> None:
-        """Install the given packages using apt."""
-        try:
-            apt.add_package(packages)
-        except (apt.PackageNotFoundError, apt.PackageError) as e:
-            msg = f"failed to install packages {packages}"
-            logger.error(msg + ": %s", e)
-            raise StopCharm(ops.BlockedStatus(msg.capitalize()))
 
     def _setup_lustre_repository(self) -> None:
         """Set up the Lustre package repository."""
-        # Lustre packages are not in the Ubuntu archive. Add an external repository.
         try:
             release = platform.freedesktop_os_release()["VERSION_CODENAME"]
         except KeyError as e:
-            msg = "failed to determine Ubuntu version codename to configure Lustre repository"
-            logger.error(msg + ": %s", e)
-            raise StopCharm(ops.BlockedStatus(msg.capitalize()))
+            raise LustreRepositoryError("Failed to determine Ubuntu version codename") from e
+
+        logger.debug("detected OS release codename: %s", release)
 
         try:
             repo = apt.DebianRepository(
@@ -117,9 +139,9 @@ class LustreCharm(ops.CharmBase):
             repositories.add(repo)
             apt.update()
         except (apt.GPGKeyError, CalledProcessError) as e:
-            msg = f"failed to add {LUSTRE_REPOSITORY_URI} package repository"
-            logger.error(msg + ": %s", e)
-            raise StopCharm(ops.BlockedStatus(msg.capitalize()))
+            raise LustreRepositoryError(
+                f"Failed to add {LUSTRE_REPOSITORY_URI} package repository"
+            ) from e
 
 
 if __name__ == "__main__":  # pragma: nocover

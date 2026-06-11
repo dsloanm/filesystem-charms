@@ -1,6 +1,12 @@
 """Constants used within the charm."""
 
+FILESYSTEM_RELATION = "filesystem"
+FILESYSTEM_PEER_RELATION = "filesystem-peer"
+
 LUSTRE_FSNAME = "lustrefs"
+LUSTRE_MGS_MDT_MOUNTPOINT = "/mnt/mgs_mdt"
+LUSTRE_OST_MOUNT_DIRECTORY = "/mnt"
+LUSTRE_OST_DATASET_PREFIX = "ost"
 
 LUSTRE_REPOSITORY_KEY = """-----BEGIN PGP PUBLIC KEY BLOCK-----
 Comment: Hostname:

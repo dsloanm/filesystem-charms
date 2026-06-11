@@ -25,15 +25,12 @@ platforms:
 parts:
   charm: {}
 
-resources:
-  lustre-packages:
-    type: file
-    filename: lustre-packages.tar.gz
-    description: |
-      Tarball containing Lustre .deb packages (lustre-dev, lustre-iokit,
-      lustre-resource-agents, lustre-server-modules, lustre-server-utils,
-      lustre-tests). Built by build_lustre_debs.sh.
-
 peers:
-  lustre-peers:
+  lustre-peer:
     interface: lustre-peer
+  filesystem-peer:
+    interface: filesystem-peer
+
+provides:
+  filesystem:
+    interface: filesystem_info
