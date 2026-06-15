@@ -33,7 +33,7 @@ class LustrePeerAppData(pydantic.BaseModel):
     )
 
 
-class LustrePeer(ops.Object):
+class LustrePeerObserver(ops.Object):
     """Manages the Lustre peer relation."""
 
     def __init__(self, charm: "LustreCharm"):
@@ -43,8 +43,12 @@ class LustrePeer(ops.Object):
             charm.on[PEER_RELATION].relation_changed, self._on_relation_changed
         )
 
-    def mgs_nid_published(self) -> None:
-        """Publish this unit as the MGS if no MGS has been assigned yet."""
+    def mgs_nid_published(self) -> str:
+        """Publish this unit as the MGS if no MGS has been assigned yet.
+
+        Returns:
+            The published MGS NID string.
+        """
         if not self.model.unit.is_leader():
             raise LustrePeerError("Non-leader attempted to publish MGS NID")
 
@@ -56,7 +60,7 @@ class LustrePeer(ops.Object):
                 data.mgs_unit_name,
                 data.mgs_nid,
             )
-            return
+            return data.mgs_nid
 
         # NID is <address>@<LND protocol><lnd#>. Example: "10.0.0.5@tcp"
         mgs_nid = str(self.model.get_binding(PEER_RELATION).network.bind_address) + "@tcp"
@@ -65,6 +69,7 @@ class LustrePeer(ops.Object):
 
         self.set_app_data(data)
         _logger.info("Published MGS NID %s for unit %s", data.mgs_nid, data.mgs_unit_name)
+        return data.mgs_nid
 
     def get_app_data(self) -> LustrePeerAppData:
         """Return the application data in the peer relation databag."""

@@ -17,23 +17,23 @@ from constants import (
     FILESYSTEM_PEER_RELATION,
     FILESYSTEM_RELATION,
     LUSTRE_FSNAME,
+    LUSTRE_PACKAGES,
     LUSTRE_REPOSITORY_KEY,
     LUSTRE_REPOSITORY_URI,
 )
 from exceptions import LustreFilesystemError, LustrePeerError, LustreRepositoryError
-from lustre_peer import LustrePeer
+from lustre_peer import LustrePeerObserver
 from state import check_lustre
 
 logger = logging.getLogger(__name__)
 refresh = refresh(hook=check_lustre)
-
 
 class LustreCharm(ops.CharmBase):
     """Charm for the Lustre file system."""
 
     def __init__(self, framework: ops.Framework):
         super().__init__(framework)
-        self.peers = LustrePeer(self)
+        self.peers = LustrePeerObserver(self)
         self.filesystem = FilesystemProvides(self, FILESYSTEM_RELATION, FILESYSTEM_PEER_RELATION)
         framework.observe(self.on.install, self._on_install)
         framework.observe(self.on.start, self._on_start)
@@ -46,29 +46,26 @@ class LustreCharm(ops.CharmBase):
         try:
             self._setup_lustre_repository()
         except LustreRepositoryError as e:
-            msg = "Lustre repository setup failed"
-            logger.exception("%s: %s", msg, e)
-            self.unit.status = ops.BlockedStatus(msg)
+            logger.exception("failed to set up package repository: %s", e)
+            self.unit.status = ops.BlockedStatus(str(e))
             return
 
         self.unit.status = ops.MaintenanceStatus("Installing Lustre packages")
-        # zfsutils-linux is needed but is not an explicit dependency of the Lustre debs.
-        packages = ["lustre-server-modules-dkms", "lustre-server-utils", "zfsutils-linux"]
         try:
-            apt.add_package(packages)
+            apt.add_package(LUSTRE_PACKAGES)
         except (apt.PackageNotFoundError, apt.PackageError) as e:
-            msg = f"failed to install packages {packages}"
-            logger.exception(msg + ": %s", e)
-            self.unit.status = ops.BlockedStatus(msg.capitalize())
+            message = f"failed to install packages {LUSTRE_PACKAGES}"
+            logger.exception("%s: %s", message, e)
+            self.unit.status = ops.BlockedStatus(message.capitalize())
             return
 
-        self.unit.status = ops.MaintenanceStatus("Initializing modules and LNet")
+        self.unit.status = ops.MaintenanceStatus("Initializing LNet")
         try:
             lustre_fs.init()
         except LustreFilesystemError as e:
-            msg = "Lustre filesystem initialization failed"
-            logger.exception("%s: %s", msg, e)
-            self.unit.status = ops.BlockedStatus(msg)
+            message = "Lustre filesystem initialization failed"
+            logger.exception("%s: %s", message, e)
+            self.unit.status = ops.BlockedStatus(message)
             return
 
         self.unit.status = ops.MaintenanceStatus("Preparing to start Lustre services")
@@ -87,21 +84,11 @@ class LustreCharm(ops.CharmBase):
             if self.unit.is_leader():
                 # Initial leader is MGS+MDS for lifetime of deployment.
                 lustre_fs.mgs_mds_setup(LUSTRE_FSNAME)
-                self.peers.mgs_nid_published()
+                mgs_nid = self.peers.mgs_nid_published()
+                self.filesystem.set_info(LustreInfo(mgs_ids=[mgs_nid], fs_name=LUSTRE_FSNAME))
 
-                # Ensure info provided to filesystem interface matches the published MGS NID.
-                try:
-                    data = self.peers.get_app_data()
-                except LustrePeerError as e:
-                    msg = "failed to get peer relation data after publishing MGS NID"
-                    logger.exception("%s: %s", msg, e)
-                    self.unit.status = ops.BlockedStatus(msg.capitalize())
-                    return
-                lustre_info = LustreInfo(mgs_ids=[data.mgs_nid], fs_name=LUSTRE_FSNAME)
-                self.filesystem.set_info(lustre_info)
-
-            # Initial non-leaders are OSSes and must wait for the leader to publish MGS info in the
-            # peer relation before starting.
+            # Initial non-leaders are OSSes and must wait for leader to publish MGS info in the peer
+            # relation before starting.
             return
 
         # MGS is already published. This is a restart or a slow OSS initial deployment.
@@ -121,27 +108,30 @@ class LustreCharm(ops.CharmBase):
         try:
             release = platform.freedesktop_os_release()["VERSION_CODENAME"]
         except KeyError as e:
-            raise LustreRepositoryError("Failed to determine Ubuntu version codename") from e
+            raise LustreRepositoryError("Failed to determine OS version codename") from e
 
         logger.debug("detected OS release codename: %s", release)
 
+        repo = apt.DebianRepository(
+            enabled=True,
+            repotype="deb",
+            uri=LUSTRE_REPOSITORY_URI,
+            release=release,
+            groups=["main"],
+            filename="lustre-repo",
+        )
+        repositories = apt.RepositoryMapping()
+
         try:
-            repo = apt.DebianRepository(
-                enabled=True,
-                repotype="deb",
-                uri=LUSTRE_REPOSITORY_URI,
-                release=release,
-                groups=["main"],
-                filename="lustre-repo",
-            )
             repo.import_key(LUSTRE_REPOSITORY_KEY)
-            repositories = apt.RepositoryMapping()
+        except apt.GPGKeyError as e:
+            raise LustreRepositoryError(f"Failed to import GPG key for Lustre package repository") from e
+
+        try:
             repositories.add(repo)
             apt.update()
-        except (apt.GPGKeyError, CalledProcessError) as e:
-            raise LustreRepositoryError(
-                f"Failed to add {LUSTRE_REPOSITORY_URI} package repository"
-            ) from e
+        except CalledProcessError as e:
+            raise LustreRepositoryError(f"Failed to add Lustre package repository") from e
 
 
 if __name__ == "__main__":  # pragma: nocover

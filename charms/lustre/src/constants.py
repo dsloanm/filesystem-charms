@@ -8,6 +8,8 @@ LUSTRE_MGS_MDT_MOUNTPOINT = "/mnt/mgs_mdt"
 LUSTRE_OST_MOUNT_DIRECTORY = "/mnt"
 LUSTRE_OST_DATASET_PREFIX = "ost"
 
+# zfsutils-linux is needed but is not an explicit dependency of the Lustre debs.
+LUSTRE_PACKAGES = ["lustre-server-modules-dkms", "lustre-server-utils", "zfsutils-linux"]
 LUSTRE_REPOSITORY_KEY = """-----BEGIN PGP PUBLIC KEY BLOCK-----
 Comment: Hostname:
 Version: Hockeypuck 2.2

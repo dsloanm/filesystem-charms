@@ -20,14 +20,7 @@ _logger = logging.getLogger(__name__)
 
 
 def init() -> None:
-    """Load Lustre kernel modules and bring up LNet. Idempotent."""
-    # This is idempotent. "modprobe will succeed (and do nothing) if told to insert a module which
-    # is already present" - https://man7.org/linux/man-pages/man8/modprobe.8.html
-    try:
-        subprocess.run(["modprobe", "lustre"], check=True)
-    except subprocess.CalledProcessError as e:
-        raise LustreFilesystemError("Failed to load Lustre kernel module") from e
-
+    """Initialize Lustre by bringing up LNet. Idempotent."""
     # Enable LNet on default network interface if not already enabled.
     # TODO: Add more robust detection. Multi-rail setup must be considered.
     # TODO: Add InfiniBand support. MVP is scoped to TCP for now.

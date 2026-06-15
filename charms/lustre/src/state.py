@@ -15,7 +15,7 @@ from constants import (
     LUSTRE_OST_DATASET_PREFIX,
     LUSTRE_OST_MOUNT_DIRECTORY,
 )
-from lustre_peer import LustrePeerError
+from exceptions import LustrePeerError
 
 if TYPE_CHECKING:
     from charm import LustreCharm
