@@ -19,4 +19,3 @@ class LustrePeerError(LustreError):
     """Raised when a Lustre peer relation operation fails."""
 
     pass
-

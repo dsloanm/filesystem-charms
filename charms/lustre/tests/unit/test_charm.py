@@ -6,16 +6,15 @@
 """Lustre charm unit tests."""
 
 import importlib
+from subprocess import CalledProcessError
+
+import charm
 import pytest
 from charmlibs.apt import GPGKeyError, PackageError
-from pytest_mock import mocker
-import charm
-from ops import testing
-from subprocess import CalledProcessError
 from constants import LUSTRE_FSNAME, LUSTRE_PACKAGES
 from errors import LustreFilesystemError
 from lustre_peer import LustrePeerAppData
-
+from ops import testing
 
 APP_NAME = "lustre-test"
 
@@ -31,7 +30,9 @@ class TestCharmInstall:
 
     @pytest.fixture(scope="function")
     def mock_os_release(self, mocker):
-        return mocker.patch("platform.freedesktop_os_release", return_value={"VERSION_CODENAME": "noble"})
+        return mocker.patch(
+            "platform.freedesktop_os_release", return_value={"VERSION_CODENAME": "noble"}
+        )
 
     @pytest.fixture(scope="function")
     def mock_lustre_init(self, mocker):
@@ -44,7 +45,9 @@ class TestCharmInstall:
         out = ctx.run(ctx.on.install(), testing.State())
         assert out.unit_status == testing.MaintenanceStatus(charm.CharmStatuses.PREPARING_SERVICES)
 
-    def test_install_missing_version_codename(self, ctx, mocker, mock_os_release, mock_lustre_init):
+    def test_install_missing_version_codename(
+        self, ctx, mocker, mock_os_release, mock_lustre_init
+    ):
         mock_os_release.return_value = {}
 
         out = ctx.run(ctx.on.install(), testing.State())
@@ -111,7 +114,9 @@ class TestCharmStart:
     def mock_peer_observer(self, mocker):
         return mocker.patch("charm.LustrePeerObserver", autospec=True)
 
-    def test_start_leader_initial_deployment(self, ctx, mocker, mock_mgs_mds_setup, mock_peer_observer):
+    def test_start_leader_initial_deployment(
+        self, ctx, mocker, mock_mgs_mds_setup, mock_peer_observer
+    ):
         """Leader with no MGS published."""
         nid = "10.0.0.1@tcp"
 
@@ -130,7 +135,9 @@ class TestCharmStart:
         assert call_arg.mgs_ids == [nid]
         assert call_arg.fs_name == LUSTRE_FSNAME
 
-    def test_start_non_leader_initial_deployment(self, ctx, mock_mgs_mds_setup, mock_oss_setup, mock_peer_observer):
+    def test_start_non_leader_initial_deployment(
+        self, ctx, mock_mgs_mds_setup, mock_oss_setup, mock_peer_observer
+    ):
         """Non-leader with no MGS published."""
         mock_peer_observer.return_value.get_app_data.return_value = LustrePeerAppData()
 

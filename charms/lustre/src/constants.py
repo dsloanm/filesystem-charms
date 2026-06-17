@@ -6,7 +6,6 @@
 
 from pathlib import Path
 
-
 FILESYSTEM_RELATION = "filesystem"
 FILESYSTEM_PEER_RELATION = "filesystem-peer"
 

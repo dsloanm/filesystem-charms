@@ -81,7 +81,7 @@ class LustrePeerObserver(ops.Object):
         rel = self._get_relation_checked()
         rel.save(data, rel.app)
 
-    def _on_relation_changed(self, event: ops.RelationChangedEvent) -> None:
+    def _on_relation_changed(self, _: ops.RelationChangedEvent) -> None:
         try:
             data = self.get_app_data()
         except LustrePeerError as e:

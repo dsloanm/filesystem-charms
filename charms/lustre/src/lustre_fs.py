@@ -23,32 +23,8 @@ _logger = logging.getLogger(__name__)
 
 def init() -> None:
     """Initialize Lustre by bringing up LNet. Idempotent."""
-    # Enable LNet on default network interface if not already enabled.
-    # TODO: More robust detection.
-    # TODO: Add InfiniBand support. MVP is scoped to TCP for now.
-    interface = _get_default_interface()
-    try:
-        result = subprocess.run(["lnetctl", "net", "show", "--net", "tcp"])
-        if result.returncode != 0:
-            # Command failed to get the tcp network. Need to create it.
-            subprocess.run(
-                ["lnetctl", "net", "add", "--net", "tcp", "--if", interface], check=True
-            )
-        else:
-            _logger.info("LNet TCP network already exists. skipping creation")
-            return
-
-        # TODO: might want to check if the tcp network is assigned to the
-        # correct interface?
-    except subprocess.CalledProcessError as e:
-        raise LustreFilesystemError("Failed to configure LNet") from e
-
-    try:
-        # Persist changes.
-        result = subprocess.check_output(["lnetctl", "export", "--backup"], text=True)
-        LUSTRE_LNET_CONF.write_text(result)
-    except (subprocess.CalledProcessError, IOError) as e:
-        raise LustreFilesystemError("Failed to write LNet configuration data") from e
+    _ensure_lnet_tcp(_get_default_interface())
+    _persist_lnet_config()
 
 
 def mgs_mds_setup(fsname: str) -> None:
@@ -85,7 +61,9 @@ def oss_setup(fsname: str, unit_name: str, mgs_nid: str) -> None:
     try:
         unit_num = int(unit_name.split("/")[1])
     except (IndexError, ValueError) as e:
-        raise LustreFilesystemError(f"Failed to parse unit number from unit name '{unit_name}'") from e
+        raise LustreFilesystemError(
+            f"Failed to parse unit number from unit name '{unit_name}'"
+        ) from e
     ost_index = unit_num * max_osts_per_oss  # + ost_num
 
     dataset = f"{LUSTRE_OST_DATASET_PREFIX}{ost_index}"
@@ -215,7 +193,22 @@ def _mount(pool: str, dataset: str, mountpoint: Path) -> None:
     try:
         subprocess.run(["mount", "-t", "lustre", full_dataset_name, str(mountpoint)], check=True)
     except subprocess.CalledProcessError as e:
-        raise LustreFilesystemError(f"Failed to mount Lustre target {full_dataset_name} at {mountpoint}") from e
+        raise LustreFilesystemError(
+            f"Failed to mount Lustre target {full_dataset_name} at {mountpoint}"
+        ) from e
+
+
+def _ensure_lnet_tcp(interface: str) -> None:
+    """Ensure an LNet TCP network exists on the given interface. Idempotent."""
+    try:
+        result = subprocess.run(["lnetctl", "net", "show", "--net", "tcp"])
+        if result.returncode != 0:
+            subprocess.run(
+                ["lnetctl", "net", "add", "--net", "tcp", "--if", interface], check=True
+            )
+        # TODO: verify the tcp network is assigned to the correct interface?
+    except subprocess.CalledProcessError as e:
+        raise LustreFilesystemError("Failed to configure LNet") from e
 
 
 def _get_default_interface():
@@ -235,7 +228,18 @@ def _get_default_interface():
     try:
         return routes[0]["dev"]
     except (IndexError, KeyError) as e:
-        raise LustreFilesystemError("Failed to extract default network interface from route data") from e
+        raise LustreFilesystemError(
+            "Failed to extract default network interface from route data"
+        ) from e
+
+
+def _persist_lnet_config() -> None:
+    """Export and persist the current LNet configuration."""
+    try:
+        result = subprocess.check_output(["lnetctl", "export", "--backup"], text=True)
+        LUSTRE_LNET_CONF.write_text(result)
+    except (subprocess.CalledProcessError, IOError) as e:
+        raise LustreFilesystemError("Failed to write LNet configuration data") from e
 
 
 def _pool_exists(pool: str) -> bool:
@@ -250,9 +254,9 @@ def _target_exists(full_dataset_name: str) -> bool:
     """Return True if a ZFS dataset with the given name already exists."""
     # TODO: handle if the dataset exists but is not formatted as Lustre.
     try:
-        return subprocess.run(
-            ["zfs", "list", full_dataset_name], capture_output=True
-        ).returncode == 0
+        return (
+            subprocess.run(["zfs", "list", full_dataset_name], capture_output=True).returncode == 0
+        )
     except subprocess.CalledProcessError as e:
         raise LustreFilesystemError(
             f"Failed to check ZFS dataset '{full_dataset_name}' existence"
