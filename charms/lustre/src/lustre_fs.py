@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 from constants import (
+    LUSTRE_LNET_CONF,
     LUSTRE_MGS_MDT_MOUNTPOINT,
     LUSTRE_OST_DATASET_PREFIX,
     LUSTRE_OST_MOUNT_DIRECTORY,
@@ -22,22 +23,28 @@ _logger = logging.getLogger(__name__)
 def init() -> None:
     """Initialize Lustre by bringing up LNet. Idempotent."""
     # Enable LNet on default network interface if not already enabled.
-    # TODO: Add more robust detection. Multi-rail setup must be considered.
+    # TODO: More robust detection. Multi-rail setup must be considered.
     # TODO: Add InfiniBand support. MVP is scoped to TCP for now.
     interface = _get_default_interface()
-    if not _nid_exists(f"{interface}@tcp"):
-        try:
+    try:
+        result = subprocess.run(["lnetctl", "net", "show", "--net", "tcp"])
+        if result.returncode != 0:
+            # Command failed to get the tcp network. Need to create it.
             subprocess.run(
                 ["lnetctl", "net", "add", "--net", "tcp", "--if", interface], check=True
             )
-            # Persist changes.
-            result = subprocess.run(
-                ["lnetctl", "export", "--backup"], capture_output=True, text=True, check=True
-            )
-        except subprocess.CalledProcessError as e:
-            raise LustreFilesystemError("Failed to configure LNet") from e
 
-        Path("/etc/lnet.conf").write_text(result.stdout)
+        # TODO: might want to check if the tcp network is assigned to the
+        # correct interface?
+    except subprocess.CalledProcessError as e:
+        raise LustreFilesystemError("Failed to configure LNet") from e
+
+    try:
+        # Persist changes.
+        result = subprocess.check_output(["lnetctl", "export", "--backup"], text=True)
+        LUSTRE_LNET_CONF.write_text(result)
+    except (subprocess.CalledProcessError, IOError) as e:
+        raise LustreFilesystemError("Failed to write LNet configuration data") from e
 
 
 def mgs_mds_setup(fsname: str) -> None:
@@ -64,7 +71,10 @@ def oss_setup(fsname: str, unit_name: str, mgs_nid: str) -> None:
     # pool, and pools per OSS (zpools and OSTs are 1:1). See:
     # https://wiki.lustre.org/ZFS_System_Design
     max_osts_per_oss = 1
-    unit_num = int(unit_name.split("/")[1])
+    try:
+        unit_num = int(unit_name.split("/")[1])
+    except (IndexError, ValueError) as e:
+        raise LustreFilesystemError(f"Failed to parse unit number from unit name '{unit_name}'") from e
     ost_index = unit_num * max_osts_per_oss  # + ost_num
 
     dataset = f"{LUSTRE_OST_DATASET_PREFIX}{ost_index}"
@@ -92,7 +102,10 @@ def _detect_devices() -> list[str]:
     for num in range(4):
         image = Path(f"/root/disk{num}.img")
         if not image.exists():
-            subprocess.run(["truncate", "-s", "1G", image], check=True)
+            try:
+                subprocess.run(["truncate", "-s", "1G", image], check=True)
+            except subprocess.CalledProcessError as e:
+                raise LustreFilesystemError(f"Failed to create image file {image}") from e
         devices.append(str(image))
 
     return devices
@@ -118,7 +131,10 @@ def _mgt_mdt_zpool(pool: str, devices: list[str]) -> None:
         cmd.extend(["mirror", pair[0], pair[1]])
 
     _logger.info("Creating MGT/MDT zpool with command: %s", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        raise LustreFilesystemError(f"Failed to create MGT/MDT zpool '{pool}'") from e
 
 
 def _ost_zpool(pool: str, devices: list[str]) -> None:
@@ -133,7 +149,10 @@ def _ost_zpool(pool: str, devices: list[str]) -> None:
     cmd = ["zpool", "create", "-O", "canmount=off", pool, "raidz2"] + devices
 
     _logger.info("Creating OST zpool with command: %s", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        raise LustreFilesystemError(f"Failed to create OST zpool '{pool}'") from e
 
 
 def _lustre_target(
@@ -147,6 +166,7 @@ def _lustre_target(
     full_dataset_name = f"{pool}/{dataset}"
 
     if subprocess.run(["zfs", "list", full_dataset_name], capture_output=True).returncode == 0:
+        # TODO: handle if the dataset exists but is not formatted as Lustre.
         _logger.info("Dataset %s already exists, skipping creation", full_dataset_name)
         return
 
@@ -158,7 +178,10 @@ def _lustre_target(
         f"--fsname={fsname}",
         f"--index={index}",
     ]
-    subprocess.run(["mkfs.lustre", *flags, full_dataset_name], check=True)
+    try:
+        subprocess.run(["mkfs.lustre", *flags, full_dataset_name], check=True)
+    except subprocess.CalledProcessError as e:
+        raise LustreFilesystemError(f"Failed to format Lustre target {full_dataset_name}") from e
 
 
 def _mount(pool: str, dataset: str, mountpoint: Path) -> None:
@@ -170,24 +193,27 @@ def _mount(pool: str, dataset: str, mountpoint: Path) -> None:
     full_dataset_name = f"{pool}/{dataset}"
     mountpoint.mkdir(parents=True, exist_ok=True)
     _logger.info("Mounting %s at %s", full_dataset_name, mountpoint)
-    subprocess.run(["mount", "-t", "lustre", full_dataset_name, str(mountpoint)], check=True)
+    try:
+        subprocess.run(["mount", "-t", "lustre", full_dataset_name, str(mountpoint)], check=True)
+    except subprocess.CalledProcessError as e:
+        raise LustreFilesystemError(f"Failed to mount Lustre target {full_dataset_name} at {mountpoint}") from e
 
 
 def _get_default_interface():
     """Return the default network interface name for this unit."""
-    result = subprocess.run(
-        ["ip", "-json", "route", "show", "default"], capture_output=True, text=True, check=True
-    )
-    routes = json.loads(result.stdout)
-    return routes[0]["dev"]
-
-
-def _nid_exists(nid):
-    result = subprocess.run(["lctl", "list_nids"], capture_output=True, text=True, check=True)
-    configured_nids = [line for line in result.stdout.splitlines() if line]
-    return nid in configured_nids
+    try:
+        result = subprocess.run(
+            ["ip", "-json", "route", "show", "default"], capture_output=True, text=True, check=True
+        )
+        routes = json.loads(result.stdout)
+        return routes[0]["dev"]
+    except (json.JSONDecodeError, TypeError, subprocess.CalledProcessError, KeyError, IndexError) as e:
+        raise LustreFilesystemError("Failed to determine default network interface") from e
 
 
 def _pool_exists(pool: str) -> bool:
     """Return True if a zpool with the given name already exists, False otherwise."""
-    return subprocess.run(["zpool", "list", pool], capture_output=True).returncode == 0
+    try:
+        return subprocess.run(["zpool", "list", pool], capture_output=True).returncode == 0
+    except subprocess.CalledProcessError as e:
+        raise LustreFilesystemError(f"Failed to check zpool '{pool}' existence") from e

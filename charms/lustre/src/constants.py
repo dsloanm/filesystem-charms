@@ -1,9 +1,17 @@
+#!/usr/bin/env python3
+# Copyright 2026 dominic.sloanmurphy@canonical.com
+# See LICENSE file for licensing details.
+
 """Constants used within the charm."""
+
+from pathlib import Path
+
 
 FILESYSTEM_RELATION = "filesystem"
 FILESYSTEM_PEER_RELATION = "filesystem-peer"
 
 LUSTRE_FSNAME = "lustrefs"
+LUSTRE_LNET_CONF = Path("/etc/lnet.conf")
 LUSTRE_MGS_MDT_MOUNTPOINT = "/mnt/mgs_mdt"
 LUSTRE_OST_MOUNT_DIRECTORY = "/mnt"
 LUSTRE_OST_DATASET_PREFIX = "ost"
