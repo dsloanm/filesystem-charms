@@ -6,6 +6,7 @@
 
 import logging
 import platform
+from dataclasses import dataclass
 from subprocess import CalledProcessError
 
 import lustre_fs
@@ -21,12 +22,33 @@ from constants import (
     LUSTRE_REPOSITORY_KEY,
     LUSTRE_REPOSITORY_URI,
 )
-from exceptions import LustreFilesystemError, LustrePeerError, LustreRepositoryError
+from exceptions import LustreFilesystemError
 from lustre_peer import LustrePeerObserver
 from state import check_lustre
 
 logger = logging.getLogger(__name__)
 refresh = refresh(hook=check_lustre)
+
+
+@dataclass(frozen=True)
+class CharmStatuses:
+    REPO_SETUP = "Setting up package repository"
+    FAILED_OS_CODENAME = "Failed to determine OS version codename"
+    FAILED_IMPORT_GPG_KEY = "Failed to import GPG key for Lustre package repository"
+    FAILED_ADD_REPO = "Failed to add Lustre package repository"
+    PACKAGE_INSTALL = "Installing Lustre packages"
+    LNET_INIT = "Initializing LNet"
+    FAILED_LNET_INIT = "Lustre filesystem initialization failed"
+    PREPARING_SERVICES = "Preparing to start Lustre services"
+    STARTING_SERVICES = "Starting Lustre services"
+
+    _FAILED_INSTALL_TEMPLATE = "Failed to install packages: {packages}"
+
+    @classmethod
+    def failed_install(cls, packages: list[str]) -> str:
+        """Format the package failure message."""
+        return cls._FAILED_INSTALL_TEMPLATE.format(packages=packages)
+
 
 class LustreCharm(ops.CharmBase):
     """Charm for the Lustre file system."""
@@ -42,38 +64,33 @@ class LustreCharm(ops.CharmBase):
     def _on_install(self, _: ops.InstallEvent):
         """Install Lustre packages."""
         # Lustre packages are not in the Ubuntu archive. Add an external repository.
-        self.unit.status = ops.MaintenanceStatus("Setting up package repository")
-        try:
-            self._setup_lustre_repository()
-        except LustreRepositoryError as e:
-            logger.exception("failed to set up package repository: %s", e)
-            self.unit.status = ops.BlockedStatus(str(e))
+        self.unit.status = ops.MaintenanceStatus(CharmStatuses.REPO_SETUP)
+        success = self._setup_lustre_repository()
+        if not success:
             return
 
-        self.unit.status = ops.MaintenanceStatus("Installing Lustre packages")
+        self.unit.status = ops.MaintenanceStatus(CharmStatuses.PACKAGE_INSTALL)
         try:
             apt.add_package(LUSTRE_PACKAGES)
         except (apt.PackageNotFoundError, apt.PackageError) as e:
-            message = f"failed to install packages {LUSTRE_PACKAGES}"
-            logger.exception("%s: %s", message, e)
-            self.unit.status = ops.BlockedStatus(message.capitalize())
+            logger.exception("failed to install packages: %s. reason: %s", LUSTRE_PACKAGES, e)
+            self.unit.status = ops.BlockedStatus(CharmStatuses.failed_install(LUSTRE_PACKAGES))
             return
 
-        self.unit.status = ops.MaintenanceStatus("Initializing LNet")
+        self.unit.status = ops.MaintenanceStatus(CharmStatuses.LNET_INIT)
         try:
             lustre_fs.init()
         except LustreFilesystemError as e:
-            message = "Lustre filesystem initialization failed"
-            logger.exception("%s: %s", message, e)
-            self.unit.status = ops.BlockedStatus(message)
+            logger.exception("failed to initialize Lustre filesystem: %s", e)
+            self.unit.status = ops.BlockedStatus(CharmStatuses.FAILED_LNET_INIT)
             return
 
-        self.unit.status = ops.MaintenanceStatus("Preparing to start Lustre services")
+        self.unit.status = ops.MaintenanceStatus(CharmStatuses.PREPARING_SERVICES)
 
     @refresh
     def _on_start(self, _: ops.StartEvent):
         """Set up Lustre services."""
-        self.unit.status = ops.MaintenanceStatus("Starting Lustre services")
+        self.unit.status = ops.MaintenanceStatus(CharmStatuses.STARTING_SERVICES)
 
         data = self.peers.get_app_data()
         mgs_unit = data.mgs_unit_name
@@ -103,12 +120,14 @@ class LustreCharm(ops.CharmBase):
     def _on_update_status(self, _: ops.UpdateStatusEvent) -> None:
         """Check the health of Lustre services and update unit status."""
 
-    def _setup_lustre_repository(self) -> None:
+    def _setup_lustre_repository(self) -> bool:
         """Set up the Lustre package repository."""
         try:
             release = platform.freedesktop_os_release()["VERSION_CODENAME"]
         except KeyError as e:
-            raise LustreRepositoryError("Failed to determine OS version codename") from e
+            logger.exception("failed to determine OS version codename: %s", e)
+            self.unit.status = ops.BlockedStatus(CharmStatuses.FAILED_OS_CODENAME)
+            return False
 
         logger.debug("detected OS release codename: %s", release)
 
@@ -125,13 +144,19 @@ class LustreCharm(ops.CharmBase):
         try:
             repo.import_key(LUSTRE_REPOSITORY_KEY)
         except apt.GPGKeyError as e:
-            raise LustreRepositoryError(f"Failed to import GPG key for Lustre package repository") from e
+            logger.exception("failed to import GPG key: %s", e)
+            self.unit.status = ops.BlockedStatus(CharmStatuses.FAILED_IMPORT_GPG_KEY)
+            return False
 
         try:
             repositories.add(repo)
             apt.update()
         except CalledProcessError as e:
-            raise LustreRepositoryError(f"Failed to add Lustre package repository") from e
+            logger.exception("failed to add repository: %s", e)
+            self.unit.status = ops.BlockedStatus(CharmStatuses.FAILED_ADD_REPO)
+            return False
+
+        return True
 
 
 if __name__ == "__main__":  # pragma: nocover

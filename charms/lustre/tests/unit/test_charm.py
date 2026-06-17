@@ -42,13 +42,13 @@ class TestCharmInstall:
         mocker.patch("charm.apt")
 
         out = ctx.run(ctx.on.install(), testing.State())
-        assert out.unit_status == testing.MaintenanceStatus("Preparing to start Lustre services")
+        assert out.unit_status == testing.MaintenanceStatus(charm.CharmStatuses.PREPARING_SERVICES)
 
     def test_install_missing_version_codename(self, ctx, mocker, mock_os_release, mock_lustre_init):
         mock_os_release.return_value = {}
 
         out = ctx.run(ctx.on.install(), testing.State())
-        assert out.unit_status == testing.BlockedStatus("Failed to determine OS version codename")
+        assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_OS_CODENAME)
 
     def test_install_repo_gpg_error(self, ctx, mocker, mock_os_release, mock_lustre_init):
         mocker.patch("charm.apt.RepositoryMapping")
@@ -58,7 +58,7 @@ class TestCharmInstall:
         mock_repo.import_key.side_effect = GPGKeyError("bad key")
 
         out = ctx.run(ctx.on.install(), testing.State())
-        assert out.unit_status == testing.BlockedStatus("Failed to import GPG key for Lustre package repository")
+        assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_IMPORT_GPG_KEY)
 
     def test_install_repo_update_error(self, ctx, mocker, mock_os_release, mock_lustre_init):
         mocker.patch("charm.apt.RepositoryMapping")
@@ -67,7 +67,7 @@ class TestCharmInstall:
         mocker.patch("charm.apt.update", side_effect=CalledProcessError(1, "bad cmd"))
 
         out = ctx.run(ctx.on.install(), testing.State())
-        assert out.unit_status == testing.BlockedStatus("Failed to add Lustre package repository")
+        assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_ADD_REPO)
 
     def test_install_packages_error(self, ctx, mocker, mock_os_release, mock_lustre_init):
         mocker.patch("charm.apt.RepositoryMapping")
@@ -77,7 +77,8 @@ class TestCharmInstall:
         mocker.patch("charm.apt.add_package", side_effect=PackageError("bad package"))
 
         out = ctx.run(ctx.on.install(), testing.State())
-        assert out.unit_status == testing.BlockedStatus(f"Failed to install packages {LUSTRE_PACKAGES}")
+        expected_message = charm.CharmStatuses.failed_install(LUSTRE_PACKAGES)
+        assert out.unit_status == testing.BlockedStatus(expected_message)
 
     def test_install_lustre_init_error(self, ctx, mocker, mock_os_release, mock_lustre_init):
         mocker.patch("charm.apt")

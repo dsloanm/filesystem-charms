@@ -205,10 +205,18 @@ def _get_default_interface():
         result = subprocess.run(
             ["ip", "-json", "route", "show", "default"], capture_output=True, text=True, check=True
         )
+    except subprocess.CalledProcessError as e:
+        raise LustreFilesystemError("Failed to query default network interface") from e
+
+    try:
         routes = json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        raise LustreFilesystemError("Failed to parse default route data") from e
+
+    try:
         return routes[0]["dev"]
-    except (json.JSONDecodeError, TypeError, subprocess.CalledProcessError, KeyError, IndexError) as e:
-        raise LustreFilesystemError("Failed to determine default network interface") from e
+    except (IndexError, KeyError) as e:
+        raise LustreFilesystemError("Failed to extract default network interface from route data") from e
 
 
 def _pool_exists(pool: str) -> bool:

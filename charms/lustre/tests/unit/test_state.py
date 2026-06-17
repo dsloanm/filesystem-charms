@@ -6,6 +6,7 @@ import ops
 import pytest
 
 from state import (
+    CharmStatuses,
     kernel_modules_status_change,
     mountpoint_status_change,
     peer_relation_app_data_status_change,
@@ -21,38 +22,39 @@ from exceptions import LustrePeerError
 class TestKernelModulesStatus:
     """Kernel module status tests."""
 
-    def test_both_modules_loaded(self, tmp_path):
-        proc_modules = tmp_path / "proc_modules"
-        proc_modules.write_text("lustre 123 0\nlnet 456 0\nother 789 0\n")
-        assert kernel_modules_status_change(modules_path=str(proc_modules)) is None
+    @pytest.fixture(autouse=True)
+    def proc_modules_tmp(self, tmp_path):
+        """Fixture to create a temporary /proc/modules file."""
+        return tmp_path / "proc_modules"
 
-    def test_one_module_missing(self, tmp_path):
-        proc_modules = tmp_path / "proc_modules"
-        proc_modules.write_text("lustre 123 0\nother 789 0\n")
-        status_change = kernel_modules_status_change(modules_path=str(proc_modules))
-        assert isinstance(status_change, ops.BlockedStatus)
-        assert "lnet" in status_change.message
+    def test_both_modules_loaded(self, proc_modules_tmp):
+        proc_modules_tmp.write_text("lustre 123 0\nlnet 456 0\nother 789 0\n")
+        assert kernel_modules_status_change(modules_path=str(proc_modules_tmp)) is None
 
-    def test_both_modules_missing(self, tmp_path):
-        proc_modules = tmp_path / "proc_modules"
-        proc_modules.write_text("other 789 0\n")
-        status_change = kernel_modules_status_change(modules_path=str(proc_modules))
-        assert isinstance(status_change, ops.BlockedStatus)
-        assert "lustre" in status_change.message
-        assert "lnet" in status_change.message
+    def test_one_module_missing(self, proc_modules_tmp):
+        proc_modules_tmp.write_text("lustre 123 0\nother 789 0\n")
+        status_change = kernel_modules_status_change(modules_path=str(proc_modules_tmp))
+        assert status_change == ops.BlockedStatus(CharmStatuses.modules_missing(["lnet"]))
 
-    def test_empty_file(self, tmp_path):
-        proc_modules = tmp_path / "proc_modules"
-        proc_modules.write_text("")
-        status_change = kernel_modules_status_change(modules_path=str(proc_modules))
-        assert isinstance(status_change, ops.BlockedStatus)
-        assert "lustre" in status_change.message
-        assert "lnet" in status_change.message
+    def test_both_modules_missing(self, proc_modules_tmp):
+        proc_modules_tmp.write_text("other 789 0\n")
+        status_change = kernel_modules_status_change(modules_path=str(proc_modules_tmp))
+        assert status_change == ops.BlockedStatus(CharmStatuses.modules_missing(["lnet", "lustre"]))
+
+    def test_empty_file(self, proc_modules_tmp):
+        proc_modules_tmp.write_text("")
+        status_change = kernel_modules_status_change(modules_path=str(proc_modules_tmp))
+        assert status_change == ops.BlockedStatus(CharmStatuses.modules_missing(["lnet", "lustre"]))
+
+    def test_newline_file(self, proc_modules_tmp):
+        proc_modules_tmp.write_text("\n")
+        status_change = kernel_modules_status_change(modules_path=str(proc_modules_tmp))
+        assert status_change == ops.BlockedStatus(CharmStatuses.modules_missing(["lnet", "lustre"]))
 
     def test_file_not_found(self):
-        status_change = kernel_modules_status_change(modules_path="/nonexistent/path")
-        assert isinstance(status_change, ops.BlockedStatus)
-        assert "OS error" in status_change.message
+        modules_path = "/nonexistent/path"
+        status_change = kernel_modules_status_change(modules_path=modules_path)
+        assert status_change == ops.BlockedStatus(CharmStatuses.modules_path_failure(modules_path))
 
 
 class TestMountpointStatus:
@@ -65,16 +67,16 @@ class TestMountpointStatus:
 
     def test_does_not_exist(self, mocker):
         mocker.patch("pathlib.Path.exists", return_value=False)
-        status_change = mountpoint_status_change(Path("/mnt/test"))
-        assert isinstance(status_change, ops.BlockedStatus)
-        assert "not exist" in status_change.message
+        mountpoint = Path("/mnt/test")
+        status_change = mountpoint_status_change(mountpoint)
+        assert status_change == ops.BlockedStatus(CharmStatuses.mountpoint_missing(mountpoint))
 
     def test_not_mounted(self, mocker):
         mocker.patch("pathlib.Path.exists", return_value=True)
         mocker.patch("pathlib.Path.is_mount", return_value=False)
-        status_change = mountpoint_status_change(Path("/mnt/test"))
-        assert isinstance(status_change, ops.BlockedStatus)
-        assert "not mounted" in status_change.message
+        mountpoint = Path("/mnt/test")
+        status_change = mountpoint_status_change(mountpoint)
+        assert status_change == ops.BlockedStatus(CharmStatuses.mountpoint_not_mounted(mountpoint))
 
 
 class TestPeerRelationAppDataStatus:
@@ -87,17 +89,17 @@ class TestPeerRelationAppDataStatus:
     def test_mgs_unit_name_missing(self):
         data = LustrePeerAppData(mgs_unit_name=None, mgs_nid="10.0.0.5@tcp")
         status_change = peer_relation_app_data_status_change(data)
-        assert isinstance(status_change, ops.WaitingStatus)
+        assert status_change == ops.WaitingStatus(CharmStatuses.WAITING_PEER_DATA)
 
     def test_mgs_nid_missing(self):
         data = LustrePeerAppData(mgs_unit_name="lustre/0", mgs_nid=None)
         status_change = peer_relation_app_data_status_change(data)
-        assert isinstance(status_change, ops.WaitingStatus)
+        assert status_change == ops.WaitingStatus(CharmStatuses.WAITING_PEER_DATA)
 
     def test_both_missing(self):
         data = LustrePeerAppData(mgs_unit_name=None, mgs_nid=None)
         status_change = peer_relation_app_data_status_change(data)
-        assert isinstance(status_change, ops.WaitingStatus)
+        assert status_change == ops.WaitingStatus(CharmStatuses.WAITING_PEER_DATA)
 
 
 class TestCommonStatus:
@@ -111,13 +113,14 @@ class TestCommonStatus:
     def test_peer_data_missing(self):
         data = LustrePeerAppData(mgs_unit_name=None, mgs_nid=None)
         status_change = _common_status_change(data)
-        assert isinstance(status_change, ops.WaitingStatus)
+        assert status_change == ops.WaitingStatus(CharmStatuses.WAITING_PEER_DATA)
 
     def test_kernel_modules_missing(self, mocker):
-        mocker.patch("state.kernel_modules_status_change", return_value=ops.BlockedStatus())
+        expected_change = ops.BlockedStatus("test modules missing status")
+        mocker.patch("state.kernel_modules_status_change", return_value=expected_change)
         data = LustrePeerAppData(mgs_unit_name="lustre/0", mgs_nid="10.0.0.5@tcp")
         status_change = _common_status_change(data)
-        assert isinstance(status_change, ops.BlockedStatus)
+        assert status_change == expected_change
 
 
 class TestMgsMdsStatus:
@@ -128,9 +131,10 @@ class TestMgsMdsStatus:
         assert _mgs_mds_status_change() is None
 
     def test_mgsmds_unhealthy(self, mocker):
-        mocker.patch("state.mountpoint_status_change", return_value=ops.BlockedStatus())
+        expected_change = ops.BlockedStatus("test mgsmds unhealthy status")
+        mocker.patch("state.mountpoint_status_change", return_value=expected_change)
         status_change = _mgs_mds_status_change()
-        assert isinstance(status_change, ops.BlockedStatus)
+        assert status_change == expected_change
 
 
 class TestOssStatus:
@@ -145,19 +149,19 @@ class TestOssStatus:
         (tmp_path / "ost0").mkdir()
         (tmp_path / "ost1").mkdir()
 
+        expected_change = ops.BlockedStatus("test ost1 unhealthy status")
         def _mock_mountpoint_status(mp):
             if mp.name == "ost1":
-                return ops.BlockedStatus()
+                return expected_change
             return None
 
         mocker.patch("state.mountpoint_status_change", side_effect=_mock_mountpoint_status)
         status_change = _oss_status_change(mount_directory=str(tmp_path))
-        assert isinstance(status_change, ops.BlockedStatus)
+        assert status_change == expected_change
 
     def test_no_osts_exist(self, mocker, tmp_path):
         status_change = _oss_status_change(mount_directory=str(tmp_path))
-        assert isinstance(status_change, ops.BlockedStatus)
-        assert "No OST mountpoints found" in status_change.message
+        assert status_change == ops.BlockedStatus(CharmStatuses.osts_missing(mount_directory=str(tmp_path)))
 
 
 class TestCheckLustre:
@@ -180,7 +184,7 @@ class TestCheckLustre:
         mocker.patch("state._mgs_mds_status_change", return_value=None)
 
         result = check_lustre(mock_charm)
-        assert result == ops.ActiveStatus("MGS+MDS ready")
+        assert result == ops.ActiveStatus(CharmStatuses.MGS_MDS_READY)
 
     def test_oss_healthy(self, mocker, mock_charm):
         """OSS unit, all checks pass."""
@@ -191,13 +195,13 @@ class TestCheckLustre:
         mocker.patch("state._oss_status_change", return_value=None)
 
         result = check_lustre(mock_charm)
-        assert result == ops.ActiveStatus("OSS ready")
+        assert result == ops.ActiveStatus(CharmStatuses.OSS_READY)
 
     def test_peer_error(self, mocker, mock_charm):
         mock_charm.peers.get_app_data.side_effect = LustrePeerError()
 
         result = check_lustre(mock_charm)
-        assert isinstance(result, ops.BlockedStatus)
+        assert result == ops.BlockedStatus(CharmStatuses.FAILED_PEER_DATA)
 
     def test_peer_error_preserve_existing(self, mocker, mock_charm):
         existing = ops.BlockedStatus("existing error")
@@ -238,4 +242,4 @@ class TestCheckLustre:
         mocker.patch("state._mgs_mds_status_change", return_value=None)
 
         result = check_lustre(mock_charm)
-        assert result == ops.ActiveStatus("MGS+MDS ready")
+        assert result == ops.ActiveStatus(CharmStatuses.MGS_MDS_READY)

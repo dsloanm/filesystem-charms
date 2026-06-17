@@ -20,8 +20,3 @@ class LustrePeerError(LustreError):
 
     pass
 
-
-class LustreRepositoryError(LustreError):
-    """Raised when a Lustre package repository operation fails."""
-
-    pass
