@@ -11,7 +11,7 @@ import lustre_fs
 import ops
 import pydantic
 from constants import LUSTRE_FSNAME
-from exceptions import LustrePeerError
+from errors import LustrePeerError
 from state import check_lustre
 
 if TYPE_CHECKING:

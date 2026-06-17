@@ -22,7 +22,7 @@ from constants import (
     LUSTRE_REPOSITORY_KEY,
     LUSTRE_REPOSITORY_URI,
 )
-from exceptions import LustreFilesystemError
+from errors import LustreFilesystemError
 from lustre_peer import LustrePeerObserver
 from state import check_lustre
 

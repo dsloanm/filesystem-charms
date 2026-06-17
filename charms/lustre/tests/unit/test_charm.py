@@ -13,7 +13,7 @@ import charm
 from ops import testing
 from subprocess import CalledProcessError
 from constants import LUSTRE_FSNAME, LUSTRE_PACKAGES
-from exceptions import LustreFilesystemError
+from errors import LustreFilesystemError
 from lustre_peer import LustrePeerAppData
 
 
@@ -86,7 +86,7 @@ class TestCharmInstall:
         mock_lustre_init.side_effect = LustreFilesystemError("")
 
         out = ctx.run(ctx.on.install(), testing.State())
-        assert out.unit_status == testing.BlockedStatus("Lustre filesystem initialization failed")
+        assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_LNET_INIT)
 
 
 class TestCharmStart:

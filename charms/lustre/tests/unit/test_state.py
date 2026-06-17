@@ -16,13 +16,13 @@ from state import (
     _oss_status_change,
 )
 from lustre_peer import LustrePeerAppData
-from exceptions import LustrePeerError
+from errors import LustrePeerError
 
 
 class TestKernelModulesStatus:
     """Kernel module status tests."""
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture(scope="function")
     def proc_modules_tmp(self, tmp_path):
         """Fixture to create a temporary /proc/modules file."""
         return tmp_path / "proc_modules"

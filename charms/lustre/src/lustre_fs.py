@@ -11,11 +11,12 @@ from pathlib import Path
 
 from constants import (
     LUSTRE_LNET_CONF,
+    LUSTRE_MGS_MDT_DATASET_PREFIX,
     LUSTRE_MGS_MDT_MOUNTPOINT,
     LUSTRE_OST_DATASET_PREFIX,
     LUSTRE_OST_MOUNT_DIRECTORY,
 )
-from exceptions import LustreFilesystemError
+from errors import LustreFilesystemError
 
 _logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ _logger = logging.getLogger(__name__)
 def init() -> None:
     """Initialize Lustre by bringing up LNet. Idempotent."""
     # Enable LNet on default network interface if not already enabled.
-    # TODO: More robust detection. Multi-rail setup must be considered.
+    # TODO: More robust detection.
     # TODO: Add InfiniBand support. MVP is scoped to TCP for now.
     interface = _get_default_interface()
     try:
@@ -33,6 +34,9 @@ def init() -> None:
             subprocess.run(
                 ["lnetctl", "net", "add", "--net", "tcp", "--if", interface], check=True
             )
+        else:
+            _logger.info("LNet TCP network already exists. skipping creation")
+            return
 
         # TODO: might want to check if the tcp network is assigned to the
         # correct interface?
@@ -49,15 +53,22 @@ def init() -> None:
 
 def mgs_mds_setup(fsname: str) -> None:
     """Set up the MGT and MDT on this unit. Idempotent."""
-    pool = "lustrefs-mgsmdt0-pool"
-    dataset = "mgsmdt0"
+    dataset = f"{LUSTRE_MGS_MDT_DATASET_PREFIX}0"
+    pool = f"{fsname}-{dataset}-pool"
 
     _logger.info(
         "Ensuring this unit is running MGS+MDS on pool '%s' and dataset '%s'", pool, dataset
     )
 
     devices = _detect_devices()
-    _mgt_mdt_zpool(pool, devices)
+
+    try:
+        _mgt_mdt_zpool(pool, devices)
+    except ValueError as e:
+        raise LustreFilesystemError(
+            f"Failed to create MGS+MDS zpool '{pool}' with devices {devices}"
+        ) from e
+
     _lustre_target(fsname, pool, dataset, 0, mkfs_flags=["--mgs", "--mdt"])
     _mount(pool, dataset, Path(LUSTRE_MGS_MDT_MOUNTPOINT))
 
@@ -88,7 +99,14 @@ def oss_setup(fsname: str, unit_name: str, mgs_nid: str) -> None:
     )
 
     devices = _detect_devices()
-    _ost_zpool(pool, devices)
+
+    try:
+        _ost_zpool(pool, devices)
+    except ValueError as e:
+        raise LustreFilesystemError(
+            f"Failed to create OST zpool '{pool}' with devices {devices}"
+        ) from e
+
     _lustre_target(fsname, pool, dataset, ost_index, mkfs_flags=["--ost", f"--mgsnode={mgs_nid}"])
     _mount(pool, dataset, Path(f"{LUSTRE_OST_MOUNT_DIRECTORY}/{dataset}"))
 
@@ -97,7 +115,7 @@ def oss_setup(fsname: str, unit_name: str, mgs_nid: str) -> None:
 
 def _detect_devices() -> list[str]:
     """Detect available block devices for use in pools. Placeholder for actual device detection logic."""
-    # TODO: For MVP, return a fixed list of image files as block devices.
+    # TODO: For MVP, return a fixed list of image files as block devices. Replace with actual device detection in production.
     devices = []
     for num in range(4):
         image = Path(f"/root/disk{num}.img")
@@ -165,9 +183,8 @@ def _lustre_target(
     """Format a Lustre target on top of an existing ZFS pool. Idempotent."""
     full_dataset_name = f"{pool}/{dataset}"
 
-    if subprocess.run(["zfs", "list", full_dataset_name], capture_output=True).returncode == 0:
-        # TODO: handle if the dataset exists but is not formatted as Lustre.
-        _logger.info("Dataset %s already exists, skipping creation", full_dataset_name)
+    if _target_exists(full_dataset_name):
+        _logger.info("Target %s already exists, skipping creation", full_dataset_name)
         return
 
     _logger.info("Formatting Lustre target: %s", full_dataset_name)
@@ -193,6 +210,8 @@ def _mount(pool: str, dataset: str, mountpoint: Path) -> None:
     full_dataset_name = f"{pool}/{dataset}"
     mountpoint.mkdir(parents=True, exist_ok=True)
     _logger.info("Mounting %s at %s", full_dataset_name, mountpoint)
+    # TODO: determine whether a timeout should be set here.
+    # See: https://wiki.lustre.org/images/5/59/LUG2025-Lustre_Timeout_Hierarchy-Horn.pdf
     try:
         subprocess.run(["mount", "-t", "lustre", full_dataset_name, str(mountpoint)], check=True)
     except subprocess.CalledProcessError as e:
@@ -225,3 +244,16 @@ def _pool_exists(pool: str) -> bool:
         return subprocess.run(["zpool", "list", pool], capture_output=True).returncode == 0
     except subprocess.CalledProcessError as e:
         raise LustreFilesystemError(f"Failed to check zpool '{pool}' existence") from e
+
+
+def _target_exists(full_dataset_name: str) -> bool:
+    """Return True if a ZFS dataset with the given name already exists."""
+    # TODO: handle if the dataset exists but is not formatted as Lustre.
+    try:
+        return subprocess.run(
+            ["zfs", "list", full_dataset_name], capture_output=True
+        ).returncode == 0
+    except subprocess.CalledProcessError as e:
+        raise LustreFilesystemError(
+            f"Failed to check ZFS dataset '{full_dataset_name}' existence"
+        ) from e
