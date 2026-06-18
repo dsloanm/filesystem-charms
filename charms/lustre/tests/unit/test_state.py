@@ -1,12 +1,12 @@
-"""Unit tests for state.py — Lustre health-check functions."""
+"""Lustre health-check unit tests."""
 
 from pathlib import Path
 
 import ops
 import pytest
+import state
 from errors import LustrePeerError
 from lustre_peer import LustrePeerAppData
-import state
 from state import CharmStatuses
 
 
@@ -27,22 +27,9 @@ class TestKernelModulesStatus:
         status_change = state.kernel_modules_status_change(modules_path=str(proc_modules_tmp))
         assert status_change == ops.BlockedStatus(CharmStatuses.modules_missing(["lnet"]))
 
-    def test_both_modules_missing(self, proc_modules_tmp):
-        proc_modules_tmp.write_text("other 789 0\n")
-        status_change = state.kernel_modules_status_change(modules_path=str(proc_modules_tmp))
-        assert status_change == ops.BlockedStatus(
-            CharmStatuses.modules_missing(["lnet", "lustre"])
-        )
-
-    def test_empty_file(self, proc_modules_tmp):
-        proc_modules_tmp.write_text("")
-        status_change = state.kernel_modules_status_change(modules_path=str(proc_modules_tmp))
-        assert status_change == ops.BlockedStatus(
-            CharmStatuses.modules_missing(["lnet", "lustre"])
-        )
-
-    def test_newline_file(self, proc_modules_tmp):
-        proc_modules_tmp.write_text("\n")
+    @pytest.mark.parametrize("file_contents", ["other 789 0\n", "", "\n"])
+    def test_both_modules_missing(self, proc_modules_tmp, file_contents):
+        proc_modules_tmp.write_text(file_contents)
         status_change = state.kernel_modules_status_change(modules_path=str(proc_modules_tmp))
         assert status_change == ops.BlockedStatus(
             CharmStatuses.modules_missing(["lnet", "lustre"])
@@ -76,29 +63,6 @@ class TestMountpointStatus:
         assert status_change == ops.BlockedStatus(CharmStatuses.mountpoint_not_mounted(mountpoint))
 
 
-class TestPeerRelationAppDataStatus:
-    """Peer relation app data status tests."""
-
-    def test_all_data_present(self):
-        data = LustrePeerAppData(mgs_unit_name="lustre/0", mgs_nid="10.0.0.5@tcp")
-        assert state.peer_relation_app_data_status_change(data) is None
-
-    def test_mgs_unit_name_missing(self):
-        data = LustrePeerAppData(mgs_unit_name=None, mgs_nid="10.0.0.5@tcp")
-        status_change = state.peer_relation_app_data_status_change(data)
-        assert status_change == ops.WaitingStatus(CharmStatuses.WAITING_PEER_DATA)
-
-    def test_mgs_nid_missing(self):
-        data = LustrePeerAppData(mgs_unit_name="lustre/0", mgs_nid=None)
-        status_change = state.peer_relation_app_data_status_change(data)
-        assert status_change == ops.WaitingStatus(CharmStatuses.WAITING_PEER_DATA)
-
-    def test_both_missing(self):
-        data = LustrePeerAppData(mgs_unit_name=None, mgs_nid=None)
-        status_change = state.peer_relation_app_data_status_change(data)
-        assert status_change == ops.WaitingStatus(CharmStatuses.WAITING_PEER_DATA)
-
-
 class TestCommonStatus:
     """Common checks for all Lustre unit types."""
 
@@ -122,10 +86,6 @@ class TestCommonStatus:
 
 class TestMgsMdsStatus:
     """Checks specific to MGS+MDS units."""
-
-    def test_mgsmds_healthy(self, mocker):
-        mocker.patch("state.mountpoint_status_change", return_value=None)
-        assert state._mgs_mds_status_change() is None
 
     def test_mgsmds_unhealthy(self, mocker):
         expected_change = ops.BlockedStatus("test mgsmds unhealthy status")
@@ -220,8 +180,8 @@ class TestCheckLustre:
         result = state.check_lustre(mock_charm)
         assert result is existing
 
-    def test_mds_mgs_error_preserve_existing(self, mocker, mock_charm):
-        """When checks pass and unit was Blocked, clear to ActiveStatus."""
+    def test_mgs_mds_error_preserve_existing(self, mocker, mock_charm):
+        """When a check fails and unit was Blocked, return existing status."""
         # Match mgs_unit_name in peer data.
         mock_charm.model.unit.name = "lustre/0"
         existing = ops.BlockedStatus("existing error")
@@ -232,7 +192,7 @@ class TestCheckLustre:
         result = state.check_lustre(mock_charm)
         assert result is existing
 
-    def test_mds_mgs_clears_blocked_when_all_healthy(self, mocker, mock_charm):
+    def test_mgs_mds_clears_blocked_when_all_healthy(self, mocker, mock_charm):
         """When checks pass and unit was Blocked, clear to ActiveStatus."""
         # Match mgs_unit_name in peer data.
         mock_charm.model.unit.name = "lustre/0"

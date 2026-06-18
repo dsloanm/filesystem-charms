@@ -38,22 +38,20 @@ class TestCharmInstall:
     def mock_lustre_init(self, mocker):
         return mocker.patch("charm.lustre_fs.init", autospec=True)
 
-    def test_install_success(self, ctx, mocker, mock_os_release, mock_lustre_init):
+    def test_success(self, ctx, mocker, mock_os_release, mock_lustre_init):
         """Test the install event handler with successful execution."""
         mocker.patch("charm.apt")
 
         out = ctx.run(ctx.on.install(), testing.State())
         assert out.unit_status == testing.MaintenanceStatus(charm.CharmStatuses.PREPARING_SERVICES)
 
-    def test_install_missing_version_codename(
-        self, ctx, mocker, mock_os_release, mock_lustre_init
-    ):
+    def test_missing_version_codename(self, ctx, mocker, mock_os_release, mock_lustre_init):
         mock_os_release.return_value = {}
 
         out = ctx.run(ctx.on.install(), testing.State())
         assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_OS_CODENAME)
 
-    def test_install_repo_gpg_error(self, ctx, mocker, mock_os_release, mock_lustre_init):
+    def test_repo_gpg_error(self, ctx, mocker, mock_os_release, mock_lustre_init):
         mocker.patch("charm.apt.RepositoryMapping")
         mocker.patch("charm.apt.update")
 
@@ -63,7 +61,7 @@ class TestCharmInstall:
         out = ctx.run(ctx.on.install(), testing.State())
         assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_IMPORT_GPG_KEY)
 
-    def test_install_repo_update_error(self, ctx, mocker, mock_os_release, mock_lustre_init):
+    def test_repo_update_error(self, ctx, mocker, mock_os_release, mock_lustre_init):
         mocker.patch("charm.apt.RepositoryMapping")
         mocker.patch("charm.apt.DebianRepository")
 
@@ -72,7 +70,7 @@ class TestCharmInstall:
         out = ctx.run(ctx.on.install(), testing.State())
         assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_ADD_REPO)
 
-    def test_install_packages_error(self, ctx, mocker, mock_os_release, mock_lustre_init):
+    def test_packages_error(self, ctx, mocker, mock_os_release, mock_lustre_init):
         mocker.patch("charm.apt.RepositoryMapping")
         mocker.patch("charm.apt.DebianRepository")
         mocker.patch("charm.apt.update")
@@ -83,7 +81,7 @@ class TestCharmInstall:
         expected_message = charm.CharmStatuses.failed_install(LUSTRE_PACKAGES)
         assert out.unit_status == testing.BlockedStatus(expected_message)
 
-    def test_install_lustre_init_error(self, ctx, mocker, mock_os_release, mock_lustre_init):
+    def test_lustre_init_error(self, ctx, mocker, mock_os_release, mock_lustre_init):
         mocker.patch("charm.apt")
 
         mock_lustre_init.side_effect = LustreFilesystemError("")
@@ -114,9 +112,7 @@ class TestCharmStart:
     def mock_peer_observer(self, mocker):
         return mocker.patch("charm.LustrePeerObserver", autospec=True)
 
-    def test_start_leader_initial_deployment(
-        self, ctx, mocker, mock_mgs_mds_setup, mock_peer_observer
-    ):
+    def test_leader_initial_deployment(self, ctx, mocker, mock_mgs_mds_setup, mock_peer_observer):
         """Leader with no MGS published."""
         nid = "10.0.0.1@tcp"
 
@@ -135,7 +131,7 @@ class TestCharmStart:
         assert call_arg.mgs_ids == [nid]
         assert call_arg.fs_name == LUSTRE_FSNAME
 
-    def test_start_non_leader_initial_deployment(
+    def test_non_leader_initial_deployment(
         self, ctx, mock_mgs_mds_setup, mock_oss_setup, mock_peer_observer
     ):
         """Non-leader with no MGS published."""
@@ -147,7 +143,7 @@ class TestCharmStart:
         mock_mgs_mds_setup.assert_not_called()
         mock_oss_setup.assert_not_called()
 
-    def test_start_restart_mgs_unit(self, ctx, mocker, mock_mgs_mds_setup, mock_peer_observer):
+    def test_restart_mgs_unit(self, ctx, mocker, mock_mgs_mds_setup, mock_peer_observer):
         """MGS already published. This unit is the MGS."""
         app_data = LustrePeerAppData(mgs_nid="10.0.0.1@tcp", mgs_unit_name=f"{APP_NAME}/0")
         mock_peer_observer.return_value.get_app_data.return_value = app_data
@@ -156,10 +152,10 @@ class TestCharmStart:
 
         mock_mgs_mds_setup.assert_called_once_with(LUSTRE_FSNAME)
 
-    def test_start_restart_oss_unit(self, ctx, mock_oss_setup, mock_peer_observer):
+    def test_restart_oss_unit(self, ctx, mock_oss_setup, mock_peer_observer):
         """MGS already published. This unit is an OSS."""
         nid = "10.0.0.1@tcp"
-        app_data = LustrePeerAppData(mgs_nid=nid, mgs_unit_name="{APP_NAME}/1")
+        app_data = LustrePeerAppData(mgs_nid=nid, mgs_unit_name=f"{APP_NAME}/1")
         mock_peer_observer.return_value.get_app_data.return_value = app_data
 
         ctx.run(ctx.on.start(), testing.State(leader=True))
