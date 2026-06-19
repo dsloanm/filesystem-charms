@@ -96,7 +96,8 @@ class TestCharmStart:
     @pytest.fixture(scope="function", autouse=True)
     def mock_refresh(self, mocker):
         mocked = mocker.patch("charmed_hpc_libs.ops.refresh", lambda hook=None: lambda func: func)
-        # Required to apply the mock for the @refresh decorator.
+        # Required to apply the mock for the @refresh decorator. Decorators are applied at import
+        # time so module must be reloaded after mocking refresh.
         importlib.reload(charm)
         return mocked
 

@@ -297,7 +297,6 @@ class TestMount:
         )
 
     def test_skips_when_already_mounted(self, mocker, mountpoint_tmp, mock_run):
-        mountpoint_tmp.mkdir()
         mocker.patch.object(Path, "is_mount", return_value=True)
 
         lustre_fs._mount("pool", "dataset", mountpoint_tmp)
