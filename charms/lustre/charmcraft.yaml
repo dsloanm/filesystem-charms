@@ -6,15 +6,19 @@
 name: lustre
 type: charm
 title: Lustre Parallel File System
-summary: Provide the Lustre parallel file system.
+summary: Provides the Lustre parallel file system.
 description: |
-  A single sentence that says what the charm is, concisely and memorably.
+  This charm enables the deployment and management of the Lustre parallel file system.
 
-  A paragraph of one to three short sentences, that describe what the charm does.
+  This single charm provides all Lustre server components: MGS (Management Server), MDS (Metadata
+  Server), and OSS (Object Storage Server) and intelligently provisions each. Storage targets are
+  automatically set up as ZFS-backed pools and datasets. LNet is initialized, providing the network
+  layer.
 
-  A third paragraph that explains what need the charm meets.
+  It meets the need for a standard, reproducible deployment of Lustre within a Juju environment.
 
-  Finally, a paragraph that describes whom the charm is useful for.
+  It is useful for HPC and data-intensive teams looking for a high-throughput, scalable, distributed
+  file system.
 
 # Documentation:
 # https://documentation.ubuntu.com/charmcraft/stable/howto/build-guides/select-platforms/

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2026 dominic.sloanmurphy@canonical.com
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Constants used within the charm."""

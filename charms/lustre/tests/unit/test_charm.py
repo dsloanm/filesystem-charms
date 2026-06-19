@@ -1,7 +1,5 @@
-# Copyright 2026 dominic.sloanmurphy@canonical.com
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
-#
-# To learn more about testing, see https://documentation.ubuntu.com/ops/latest/explanation/testing/
 
 """Lustre charm unit tests."""
 
@@ -12,7 +10,7 @@ import charm
 import pytest
 from charmlibs.apt import GPGKeyError, PackageError
 from constants import LUSTRE_FSNAME, LUSTRE_PACKAGES
-from errors import LustreFilesystemError
+from errors import LustreFilesystemError, LustrePeerError
 from lustre_peer import LustrePeerAppData
 from ops import testing
 
@@ -30,28 +28,32 @@ class TestCharmInstall:
 
     @pytest.fixture(scope="function")
     def mock_os_release(self, mocker):
+        """Mock platform.freedesktop_os_release."""
         return mocker.patch(
             "platform.freedesktop_os_release", return_value={"VERSION_CODENAME": "noble"}
         )
 
     @pytest.fixture(scope="function")
     def mock_lustre_init(self, mocker):
+        """Mock lustre_fs.init."""
         return mocker.patch("charm.lustre_fs.init", autospec=True)
 
     def test_success(self, ctx, mocker, mock_os_release, mock_lustre_init):
-        """Test the install event handler with successful execution."""
+        """Successful install."""
         mocker.patch("charm.apt")
 
         out = ctx.run(ctx.on.install(), testing.State())
         assert out.unit_status == testing.MaintenanceStatus(charm.CharmStatuses.PREPARING_SERVICES)
 
     def test_missing_version_codename(self, ctx, mocker, mock_os_release, mock_lustre_init):
+        """OS version codename retrieval fails."""
         mock_os_release.return_value = {}
 
         out = ctx.run(ctx.on.install(), testing.State())
         assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_OS_CODENAME)
 
     def test_repo_gpg_error(self, ctx, mocker, mock_os_release, mock_lustre_init):
+        """GPG key import fails."""
         mocker.patch("charm.apt.RepositoryMapping")
         mocker.patch("charm.apt.update")
 
@@ -62,6 +64,7 @@ class TestCharmInstall:
         assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_IMPORT_GPG_KEY)
 
     def test_repo_update_error(self, ctx, mocker, mock_os_release, mock_lustre_init):
+        """Repository update fails."""
         mocker.patch("charm.apt.RepositoryMapping")
         mocker.patch("charm.apt.DebianRepository")
 
@@ -71,6 +74,7 @@ class TestCharmInstall:
         assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_ADD_REPO)
 
     def test_packages_error(self, ctx, mocker, mock_os_release, mock_lustre_init):
+        """Package installation fails."""
         mocker.patch("charm.apt.RepositoryMapping")
         mocker.patch("charm.apt.DebianRepository")
         mocker.patch("charm.apt.update")
@@ -82,6 +86,7 @@ class TestCharmInstall:
         assert out.unit_status == testing.BlockedStatus(expected_message)
 
     def test_lustre_init_error(self, ctx, mocker, mock_os_release, mock_lustre_init):
+        """Lustre init fails."""
         mocker.patch("charm.apt")
 
         mock_lustre_init.side_effect = LustreFilesystemError("")
@@ -95,26 +100,30 @@ class TestCharmStart:
 
     @pytest.fixture(scope="function", autouse=True)
     def mock_refresh(self, mocker):
-        mocked = mocker.patch("charmed_hpc_libs.ops.refresh", lambda hook=None: lambda func: func)
-        # Required to apply the mock for the @refresh decorator. Decorators are applied at import
-        # time so module must be reloaded after mocking refresh.
+        """Mock hook for refresh decorator."""
+        mocked = mocker.patch("state.check_lustre", autospec=True)
+        mocked.return_value = testing.ActiveStatus("test status")
+        # Decorators applied at import time so module must be reloaded after mocking refresh hook.
         importlib.reload(charm)
         return mocked
 
     @pytest.fixture(scope="function")
     def mock_mgs_mds_setup(self, mocker):
+        """Mock mgs_mds_setup."""
         return mocker.patch("charm.lustre_fs.mgs_mds_setup", autospec=True)
 
     @pytest.fixture(scope="function")
     def mock_oss_setup(self, mocker):
+        """Mock lustre_fs.oss_setup."""
         return mocker.patch("charm.lustre_fs.oss_setup", autospec=True)
 
     @pytest.fixture(scope="function")
     def mock_peer_observer(self, mocker):
+        """Mock LustrePeerObserver."""
         return mocker.patch("charm.LustrePeerObserver", autospec=True)
 
     def test_leader_initial_deployment(self, ctx, mocker, mock_mgs_mds_setup, mock_peer_observer):
-        """Leader with no MGS published."""
+        """Leader with no MGS published: MGS+MDS successful start."""
         nid = "10.0.0.1@tcp"
 
         mock_peer_observer.return_value.get_app_data.return_value = LustrePeerAppData()
@@ -135,7 +144,7 @@ class TestCharmStart:
     def test_non_leader_initial_deployment(
         self, ctx, mock_mgs_mds_setup, mock_oss_setup, mock_peer_observer
     ):
-        """Non-leader with no MGS published."""
+        """Non-leader with no MGS published: OSS waits."""
         mock_peer_observer.return_value.get_app_data.return_value = LustrePeerAppData()
 
         ctx.run(ctx.on.start(), testing.State(leader=False))
@@ -162,3 +171,56 @@ class TestCharmStart:
         ctx.run(ctx.on.start(), testing.State(leader=True))
 
         mock_oss_setup.assert_called_once_with(LUSTRE_FSNAME, f"{APP_NAME}/0", nid)
+
+    def test_peer_app_data_error(self, ctx, mock_peer_observer):
+        """Fails to retrieve peer relation application data."""
+        mock_peer_observer.return_value.get_app_data.side_effect = LustrePeerError("get failed")
+
+        out = ctx.run(ctx.on.start(), testing.State(leader=True))
+
+        assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_PEER_DATA)
+
+    def test_leader_initial_deployment_mgs_mds_setup_error(
+        self, ctx, mocker, mock_mgs_mds_setup, mock_peer_observer
+    ):
+        """Leader initial deployment: mgs_mds_setup fails."""
+        mock_peer_observer.return_value.get_app_data.return_value = LustrePeerAppData()
+        mock_mgs_mds_setup.side_effect = LustreFilesystemError("zpool failed")
+
+        out = ctx.run(ctx.on.start(), testing.State(leader=True))
+
+        assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_MGS_MDS_SETUP)
+
+    def test_leader_initial_deployment_mgs_nid_published_error(
+        self, ctx, mocker, mock_mgs_mds_setup, mock_peer_observer
+    ):
+        """Leader initial deployment: mgs_nid_published fails."""
+        mock_peer_observer.return_value.get_app_data.return_value = LustrePeerAppData()
+        mock_peer_observer.return_value.mgs_nid_published.side_effect = LustrePeerError(
+            "NID failed"
+        )
+
+        out = ctx.run(ctx.on.start(), testing.State(leader=True))
+
+        assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_MGS_MDS_SETUP)
+
+    def test_restart_mgs_unit_setup_error(self, ctx, mock_mgs_mds_setup, mock_peer_observer):
+        """MGS unit restart: mgs_mds_setup fails."""
+        app_data = LustrePeerAppData(mgs_nid="10.0.0.1@tcp", mgs_unit_name=f"{APP_NAME}/0")
+        mock_peer_observer.return_value.get_app_data.return_value = app_data
+        mock_mgs_mds_setup.side_effect = LustreFilesystemError("mount failed")
+
+        out = ctx.run(ctx.on.start(), testing.State(leader=True))
+
+        assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_SERVICE_SETUP)
+
+    def test_restart_oss_unit_setup_error(self, ctx, mock_oss_setup, mock_peer_observer):
+        """OSS unit restart: oss_setup fails."""
+        nid = "10.0.0.1@tcp"
+        app_data = LustrePeerAppData(mgs_nid=nid, mgs_unit_name=f"{APP_NAME}/1")
+        mock_peer_observer.return_value.get_app_data.return_value = app_data
+        mock_oss_setup.side_effect = LustreFilesystemError("zpool failed")
+
+        out = ctx.run(ctx.on.start(), testing.State(leader=True))
+
+        assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_SERVICE_SETUP)

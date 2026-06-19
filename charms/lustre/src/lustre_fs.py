@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2026 dominic.sloanmurphy@canonical.com
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Lustre filesystem operations."""
@@ -36,7 +36,7 @@ def mgs_mds_setup(fsname: str) -> None:
         "Ensuring this unit is running MGS+MDS on pool '%s' and dataset '%s'", pool, dataset
     )
 
-    devices = _detect_devices()
+    devices = _detect_devices(pool)
 
     try:
         _mgt_mdt_zpool(pool, devices)
@@ -76,7 +76,7 @@ def oss_setup(fsname: str, unit_name: str, mgs_nid: str) -> None:
         mgs_nid,
     )
 
-    devices = _detect_devices()
+    devices = _detect_devices(pool)
 
     try:
         _ost_zpool(pool, devices)
@@ -91,12 +91,12 @@ def oss_setup(fsname: str, unit_name: str, mgs_nid: str) -> None:
     _logger.info("OST index '%s' for MGS NID '%s' ready", ost_index, mgs_nid)
 
 
-def _detect_devices() -> list[str]:
+def _detect_devices(owner: str) -> list[str]:
     """Detect available block devices for use in pools. Placeholder for actual device detection logic."""
     # TODO: For MVP, return a fixed list of image files as block devices. Replace with actual device detection in production.
     devices = []
     for num in range(4):
-        image = Path(f"/root/disk{num}.img")
+        image = Path(f"/root/{owner}-disk{num}.img")
         if not image.exists():
             try:
                 subprocess.run(["truncate", "-s", "1G", image], check=True)

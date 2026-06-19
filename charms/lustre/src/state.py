@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2026 dominic.sloanmurphy@canonical.com
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Check the state of the Lustre charmed operator."""
@@ -25,6 +25,8 @@ _logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class CharmStatuses:
+    """Charm status messages."""
+
     WAITING_PEER_DATA = "Waiting for MGS unit to publish NID"
     FAILED_PEER_DATA = "Failed to get peer relation app data"
     MGS_MDS_READY = "MGS+MDS ready"

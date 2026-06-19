@@ -1,11 +1,5 @@
-# Copyright 2026 dominic.sloanmurphy@canonical.com
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
-#
-# The integration tests use the Jubilant library. See https://documentation.ubuntu.com/jubilant/
-# To learn more about testing, see https://documentation.ubuntu.com/ops/latest/explanation/testing/
-#
-# Tests declare what state they need via fixtures. Fixtures handle all setup;
-# tests only assert. Adding a new test never requires touching existing tests.
 
 """Lustre charm integration tests."""
 

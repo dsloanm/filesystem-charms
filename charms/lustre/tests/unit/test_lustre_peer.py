@@ -1,3 +1,6 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
 """Lustre peer relation observer unit tests."""
 
 import lustre_peer
@@ -13,7 +16,7 @@ BIND_IP = "10.0.0.5"
 
 @pytest.fixture(scope="function")
 def mock_model(mocker):
-    """Mocked LustrePeerObserver.model."""
+    """Mock LustrePeerObserver.model."""
     model = mocker.MagicMock()
     mocker.patch.object(
         lustre_peer.LustrePeerObserver,
@@ -35,6 +38,7 @@ class TestMgsNidPublished:
     """mgs_nid_published() tests."""
 
     def test_leader_publishes_nid(self, mocker, mock_model_with_relation):
+        """Leader unit publishes MGS NID to relation data."""
         model, rel = mock_model_with_relation
         model.unit.is_leader.return_value = True
         model.unit.name = MGS_UNIT
@@ -51,6 +55,7 @@ class TestMgsNidPublished:
         assert saved.mgs_unit_name == MGS_UNIT
 
     def test_non_leader_raises(self, mocker, mock_model):
+        """Non-leader unit raises an error when publishing MGS NID."""
         mock_model.unit.is_leader.return_value = False
 
         observer = lustre_peer.LustrePeerObserver(mocker.MagicMock())
@@ -58,6 +63,7 @@ class TestMgsNidPublished:
             observer.mgs_nid_published()
 
     def test_nid_already_published(self, mocker, mock_model_with_relation):
+        """Leader unit does not overwrite existing MGS NID in relation data."""
         model, rel = mock_model_with_relation
         model.unit.is_leader.return_value = True
         existing = lustre_peer.LustrePeerAppData(mgs_nid=MGS_NID, mgs_unit_name=MGS_UNIT)
@@ -74,6 +80,7 @@ class TestOnRelationChanged:
     """_on_relation_changed() tests."""
 
     def test_oss_unit_setup(self, mocker, mock_model_with_relation):
+        """OSS unit sets up correctly when relation data is available."""
         model, rel = mock_model_with_relation
         model.unit.name = OSS_UNIT
         rel.load.return_value = lustre_peer.LustrePeerAppData(
@@ -81,7 +88,7 @@ class TestOnRelationChanged:
             mgs_unit_name=MGS_UNIT,
         )
 
-        mock_oss = mocker.patch("lustre_peer.lustre_fs.oss_setup")
+        mock_oss = mocker.patch("lustre_peer.lustre_fs.oss_setup", autospec=True)
         expected_status = ops.ActiveStatus()
         mocker.patch("lustre_peer.check_lustre", return_value=expected_status)
 
@@ -92,8 +99,9 @@ class TestOnRelationChanged:
         assert model.unit.status == expected_status
 
     def test_app_data_error(self, mocker, mock_model):
+        """OSS unit does not set up when relation data is unavailable."""
         mock_model.get_relation.return_value = None
-        mock_oss = mocker.patch("lustre_peer.lustre_fs.oss_setup")
+        mock_oss = mocker.patch("lustre_peer.lustre_fs.oss_setup", autospec=True)
 
         observer = lustre_peer.LustrePeerObserver(mocker.MagicMock())
         observer._on_relation_changed(mocker.MagicMock())
@@ -101,9 +109,10 @@ class TestOnRelationChanged:
         mock_oss.assert_not_called()
 
     def test_mgs_data_not_published(self, mocker, mock_model_with_relation):
+        """OSS unit does not set up when MGS NID is not published."""
         _, rel = mock_model_with_relation
-        rel.load.return_value = None  # get_app_data() returns all-None default
-        mock_oss = mocker.patch("lustre_peer.lustre_fs.oss_setup")
+        rel.load.return_value = None
+        mock_oss = mocker.patch("lustre_peer.lustre_fs.oss_setup", autospec=True)
 
         observer = lustre_peer.LustrePeerObserver(mocker.MagicMock())
         observer._on_relation_changed(mocker.MagicMock())
@@ -111,13 +120,14 @@ class TestOnRelationChanged:
         mock_oss.assert_not_called()
 
     def test_mgs_unit_skips_oss(self, mocker, mock_model_with_relation):
+        """MGS unit does not attempt to set up OSS."""
         model, rel = mock_model_with_relation
         model.unit.name = MGS_UNIT
         rel.load.return_value = lustre_peer.LustrePeerAppData(
             mgs_nid=MGS_NID,
             mgs_unit_name=MGS_UNIT,
         )
-        mock_oss = mocker.patch("lustre_peer.lustre_fs.oss_setup")
+        mock_oss = mocker.patch("lustre_peer.lustre_fs.oss_setup", autospec=True)
 
         observer = lustre_peer.LustrePeerObserver(mocker.MagicMock())
         observer._on_relation_changed(mocker.MagicMock())

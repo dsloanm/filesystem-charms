@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2026 dominic.sloanmurphy@canonical.com
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Charm for the Lustre file system."""
@@ -11,7 +11,7 @@ from subprocess import CalledProcessError
 
 import lustre_fs
 import ops
-from charmed_hpc_libs.ops import refresh
+from charmed_hpc_libs.ops import StopCharm, refresh
 from charmlibs import apt
 from charms.filesystem_client.v0.filesystem_info import FilesystemProvides, LustreInfo
 from constants import (
@@ -24,7 +24,7 @@ from constants import (
 )
 from errors import LustreFilesystemError
 from lustre_peer import LustrePeerObserver
-from state import check_lustre
+from state import LustrePeerError, check_lustre
 
 logger = logging.getLogger(__name__)
 refresh = refresh(hook=check_lustre)
@@ -32,6 +32,8 @@ refresh = refresh(hook=check_lustre)
 
 @dataclass(frozen=True)
 class CharmStatuses:
+    """Charm status messages."""
+
     REPO_SETUP = "Setting up package repository"
     FAILED_OS_CODENAME = "Failed to determine OS version codename"
     FAILED_IMPORT_GPG_KEY = "Failed to import GPG key for Lustre package repository"
@@ -41,6 +43,9 @@ class CharmStatuses:
     FAILED_LNET_INIT = "Lustre filesystem initialization failed"
     PREPARING_SERVICES = "Preparing to start Lustre services"
     STARTING_SERVICES = "Starting Lustre services"
+    FAILED_PEER_DATA = "Failed to get peer relation app data"
+    FAILED_MGS_MDS_SETUP = "Failed to set up MGS+MDS"
+    FAILED_SERVICE_SETUP = "Failed to start Lustre services"
 
     _FAILED_INSTALL_TEMPLATE = "Failed to install packages: {packages}"
 
@@ -92,7 +97,12 @@ class LustreCharm(ops.CharmBase):
         """Set up Lustre services."""
         self.unit.status = ops.MaintenanceStatus(CharmStatuses.STARTING_SERVICES)
 
-        data = self.peers.get_app_data()
+        try:
+            data = self.peers.get_app_data()
+        except LustrePeerError as e:
+            logger.exception("failed to read peer relation data: %s", e)
+            raise StopCharm(ops.BlockedStatus(CharmStatuses.FAILED_PEER_DATA))
+
         mgs_unit = data.mgs_unit_name
         mgs_nid = data.mgs_nid
 
@@ -100,8 +110,13 @@ class LustreCharm(ops.CharmBase):
             # No MGS has been published yet. This is initial deployment.
             if self.unit.is_leader():
                 # Initial leader is MGS+MDS for lifetime of deployment.
-                lustre_fs.mgs_mds_setup(LUSTRE_FSNAME)
-                mgs_nid = self.peers.mgs_nid_published()
+                try:
+                    lustre_fs.mgs_mds_setup(LUSTRE_FSNAME)
+                    mgs_nid = self.peers.mgs_nid_published()
+                except (LustrePeerError, LustreFilesystemError) as e:
+                    logger.exception("failed to set up MGS+MDS: %s", e)
+                    raise StopCharm(ops.BlockedStatus(CharmStatuses.FAILED_MGS_MDS_SETUP))
+
                 self.filesystem.set_info(LustreInfo(mgs_ids=[mgs_nid], fs_name=LUSTRE_FSNAME))
 
             # Initial non-leaders are OSSes and must wait for leader to publish MGS info in the peer
@@ -109,12 +124,16 @@ class LustreCharm(ops.CharmBase):
             return
 
         # MGS is already published. This is a restart or a slow OSS initial deployment.
-        if self.model.unit.name == mgs_unit:
-            lustre_fs.mgs_mds_setup(LUSTRE_FSNAME)
-        else:
-            # OSS can start immediately if MGS info is already available. No need to wait for a peer
-            # relation event.
-            lustre_fs.oss_setup(LUSTRE_FSNAME, self.model.unit.name, mgs_nid)
+        try:
+            if self.model.unit.name == mgs_unit:
+                lustre_fs.mgs_mds_setup(LUSTRE_FSNAME)
+            else:
+                # OSS can start immediately if MGS info is already available. No need to wait for a peer
+                # relation event.
+                lustre_fs.oss_setup(LUSTRE_FSNAME, self.model.unit.name, mgs_nid)
+        except LustreFilesystemError as e:
+            logger.exception("failed to set up Lustre services: %s", e)
+            raise StopCharm(ops.BlockedStatus(CharmStatuses.FAILED_SERVICE_SETUP))
 
     @refresh
     def _on_update_status(self, _: ops.UpdateStatusEvent) -> None:
