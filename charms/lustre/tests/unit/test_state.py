@@ -8,7 +8,7 @@ from pathlib import Path
 import ops
 import pytest
 import state
-from errors import LustrePeerError
+from errors import LustrePeerError, LustreStateError
 from lustre_peer import LustrePeerAppData
 from state import CharmStatuses
 
@@ -24,28 +24,34 @@ class TestKernelModulesStatus:
     def test_both_modules_loaded(self, proc_modules_tmp):
         """Both Lustre and LNet modules are loaded."""
         proc_modules_tmp.write_text("lustre 123 0\nlnet 456 0\nother 789 0\n")
-        assert state.kernel_modules_status_change(modules_path=str(proc_modules_tmp)) is None
+        assert state._kernel_modules_check(modules_path=str(proc_modules_tmp)) is None
 
     def test_one_module_missing(self, proc_modules_tmp):
         """One of the required modules is missing."""
         proc_modules_tmp.write_text("lustre 123 0\nother 789 0\n")
-        status_change = state.kernel_modules_status_change(modules_path=str(proc_modules_tmp))
-        assert status_change == ops.BlockedStatus(CharmStatuses.modules_missing(["lnet"]))
+
+        with pytest.raises(LustreStateError) as e:
+            state._kernel_modules_check(modules_path=str(proc_modules_tmp))
+        assert e.value.status == ops.BlockedStatus(CharmStatuses.modules_missing(["lnet"]))
 
     @pytest.mark.parametrize("file_contents", ["other 789 0\n", "", "\n"])
     def test_both_modules_missing(self, proc_modules_tmp, file_contents):
         """Both Lustre and LNet modules are missing."""
         proc_modules_tmp.write_text(file_contents)
-        status_change = state.kernel_modules_status_change(modules_path=str(proc_modules_tmp))
-        assert status_change == ops.BlockedStatus(
+
+        with pytest.raises(LustreStateError) as e:
+            state._kernel_modules_check(modules_path=str(proc_modules_tmp))
+        assert e.value.status == ops.BlockedStatus(
             CharmStatuses.modules_missing(["lnet", "lustre"])
         )
 
     def test_file_not_found(self):
-        """/proc/modules file not found."""
+        """Modules file not found."""
         modules_path = "/nonexistent/path"
-        status_change = state.kernel_modules_status_change(modules_path=modules_path)
-        assert status_change == ops.BlockedStatus(CharmStatuses.modules_path_failure(modules_path))
+
+        with pytest.raises(LustreStateError) as e:
+            state._kernel_modules_check(modules_path=modules_path)
+        assert e.value.status == ops.BlockedStatus(CharmStatuses.modules_path_failure(modules_path))
 
 
 class TestMountpointStatus:
@@ -55,22 +61,26 @@ class TestMountpointStatus:
         """Mountpoint exists and is mounted."""
         mocker.patch("pathlib.Path.exists", return_value=True)
         mocker.patch("pathlib.Path.is_mount", return_value=True)
-        assert state.mountpoint_status_change(Path("/mnt/test")) is None
+        assert state._mountpoint_check(Path("/mnt/test")) is None
 
     def test_does_not_exist(self, mocker):
         """Mountpoint does not exist."""
         mocker.patch("pathlib.Path.exists", return_value=False)
         mountpoint = Path("/mnt/test")
-        status_change = state.mountpoint_status_change(mountpoint)
-        assert status_change == ops.BlockedStatus(CharmStatuses.mountpoint_missing(mountpoint))
+
+        with pytest.raises(LustreStateError) as e:
+            state._mountpoint_check(mountpoint)
+        assert e.value.status == ops.BlockedStatus(CharmStatuses.mountpoint_missing(mountpoint))
 
     def test_not_mounted(self, mocker):
         """Mountpoint exists but is not mounted."""
         mocker.patch("pathlib.Path.exists", return_value=True)
         mocker.patch("pathlib.Path.is_mount", return_value=False)
         mountpoint = Path("/mnt/test")
-        status_change = state.mountpoint_status_change(mountpoint)
-        assert status_change == ops.BlockedStatus(CharmStatuses.mountpoint_not_mounted(mountpoint))
+
+        with pytest.raises(LustreStateError) as e:
+            state._mountpoint_check(mountpoint)
+        assert e.value.status == ops.BlockedStatus(CharmStatuses.mountpoint_not_mounted(mountpoint))
 
 
 class TestCommonStatus:
@@ -78,23 +88,27 @@ class TestCommonStatus:
 
     def test_all_pass(self, mocker):
         """All common checks pass, no status change."""
-        mocker.patch("state.kernel_modules_status_change", return_value=None)
+        mocker.patch("state._kernel_modules_check")
         data = LustrePeerAppData(mgs_unit_name="lustre/0", mgs_nid="10.0.0.5@tcp")
-        assert state._common_status_change(data) is None
+        assert state._common_check(data) is None
 
     def test_peer_data_missing(self):
         """Peer data is missing."""
         data = LustrePeerAppData(mgs_unit_name=None, mgs_nid=None)
-        status_change = state._common_status_change(data)
-        assert status_change == ops.WaitingStatus(CharmStatuses.WAITING_PEER_DATA)
+
+        with pytest.raises(LustreStateError) as e:
+            state._common_check(data)
+        assert e.value.status == ops.BlockedStatus(CharmStatuses.WAITING_PEER_DATA)
 
     def test_kernel_modules_missing(self, mocker):
         """One of the required modules is missing."""
-        expected_change = ops.BlockedStatus("test modules missing status")
-        mocker.patch("state.kernel_modules_status_change", return_value=expected_change)
+        expected_status = ops.BlockedStatus("test modules missing status")
+        mocker.patch("state._kernel_modules_check", side_effect=LustreStateError(expected_status))
         data = LustrePeerAppData(mgs_unit_name="lustre/0", mgs_nid="10.0.0.5@tcp")
-        status_change = state._common_status_change(data)
-        assert status_change == expected_change
+
+        with pytest.raises(LustreStateError) as e:
+            state._common_check(data)
+        assert e.value.status == expected_status
 
 
 class TestMgsMdsStatus:
@@ -102,10 +116,11 @@ class TestMgsMdsStatus:
 
     def test_mgsmds_unhealthy(self, mocker):
         """One of the MGS+MDS checks fails."""
-        expected_change = ops.BlockedStatus("test mgsmds unhealthy status")
-        mocker.patch("state.mountpoint_status_change", return_value=expected_change)
-        status_change = state._mgs_mds_status_change()
-        assert status_change == expected_change
+        expected_status = ops.BlockedStatus("test mgsmds unhealthy status")
+        mocker.patch("state._mountpoint_check", side_effect=LustreStateError(expected_status))
+        with pytest.raises(LustreStateError) as e:
+           state._mgs_mds_check()
+        assert e.value.status == expected_status
 
 
 class TestOssStatus:
@@ -114,31 +129,35 @@ class TestOssStatus:
     def test_osts_healthy(self, mocker, tmp_path):
         """All OST checks pass."""
         (tmp_path / "ost0").mkdir()
-        mocker.patch("state.mountpoint_status_change", return_value=None)
-        assert state._oss_status_change(mount_directory=str(tmp_path)) is None
+        mocker.patch("state._mountpoint_check")
+        assert state._oss_check(mount_directory=str(tmp_path)) is None
 
     def test_one_ost_unhealthy(self, mocker, tmp_path):
         """One OST's checks fails."""
         (tmp_path / "ost0").mkdir()
         (tmp_path / "ost1").mkdir()
 
-        expected_change = ops.BlockedStatus("test ost1 unhealthy status")
-
+        expected_status = ops.BlockedStatus("test ost1 unhealthy status")
         def _mock_mountpoint_status(mp):
             if mp.name == "ost1":
-                return expected_change
+                raise LustreStateError(expected_status)
             return None
+        mocker.patch("state._mountpoint_check", side_effect=_mock_mountpoint_status)
 
-        mocker.patch("state.mountpoint_status_change", side_effect=_mock_mountpoint_status)
-        status_change = state._oss_status_change(mount_directory=str(tmp_path))
-        assert status_change == expected_change
+        with pytest.raises(LustreStateError) as e:
+            state._oss_check(mount_directory=str(tmp_path))
+        assert e.value.status == expected_status
 
     def test_no_osts_exist(self, mocker, tmp_path):
         """No OST mountpoints exist."""
-        status_change = state._oss_status_change(mount_directory=str(tmp_path))
-        assert status_change == ops.BlockedStatus(
+        expected_status = ops.BlockedStatus(
             CharmStatuses.osts_missing(mount_directory=str(tmp_path))
         )
+        mocker.patch("state._mountpoint_check", side_effect=LustreStateError(expected_status))
+
+        with pytest.raises(LustreStateError) as e:
+            state._oss_check(mount_directory=str(tmp_path))
+        assert e.value.status == expected_status
 
 
 class TestCheckLustre:
@@ -158,8 +177,8 @@ class TestCheckLustre:
         # Match mgs_unit_name in peer data.
         mock_charm.model.unit.name = "lustre/0"
 
-        mocker.patch("state._common_status_change", return_value=None)
-        mocker.patch("state._mgs_mds_status_change", return_value=None)
+        mocker.patch("state._common_check", return_value=None)
+        mocker.patch("state._mgs_mds_check", return_value=None)
 
         result = state.check_lustre(mock_charm)
         assert result == ops.ActiveStatus(CharmStatuses.MGS_MDS_READY)
@@ -169,8 +188,8 @@ class TestCheckLustre:
         # Does NOT match mgs_unit_name in peer data.
         mock_charm.model.unit.name = "lustre/1"
 
-        mocker.patch("state._common_status_change", return_value=None)
-        mocker.patch("state._oss_status_change", return_value=None)
+        mocker.patch("state._common_check", return_value=None)
+        mocker.patch("state._oss_check", return_value=None)
 
         result = state.check_lustre(mock_charm)
         assert result == ops.ActiveStatus(CharmStatuses.OSS_READY)
@@ -195,7 +214,7 @@ class TestCheckLustre:
         """When common checks fail and unit already Blocked, keep existing status."""
         existing = ops.BlockedStatus("existing error")
         mock_charm.unit.status = existing
-        mocker.patch("state._common_status_change", return_value=ops.WaitingStatus())
+        mocker.patch("state._common_check", return_value=ops.WaitingStatus())
 
         result = state.check_lustre(mock_charm)
         assert result is existing
@@ -206,8 +225,8 @@ class TestCheckLustre:
         mock_charm.model.unit.name = "lustre/0"
         existing = ops.BlockedStatus("existing error")
         mock_charm.unit.status = existing
-        mocker.patch("state._common_status_change", return_value=None)
-        mocker.patch("state._mgs_mds_status_change", return_value=ops.BlockedStatus())
+        mocker.patch("state._common_check", return_value=None)
+        mocker.patch("state._mgs_mds_check", side_effect=LustreStateError(ops.BlockedStatus("new")))
 
         result = state.check_lustre(mock_charm)
         assert result is existing
@@ -218,8 +237,8 @@ class TestCheckLustre:
         mock_charm.model.unit.name = "lustre/0"
         existing = ops.BlockedStatus("existing error")
         mock_charm.unit.status = existing
-        mocker.patch("state._common_status_change", return_value=None)
-        mocker.patch("state._mgs_mds_status_change", return_value=None)
+        mocker.patch("state._common_check", return_value=None)
+        mocker.patch("state._mgs_mds_check", return_value=None)
 
         result = state.check_lustre(mock_charm)
         assert result == ops.ActiveStatus(CharmStatuses.MGS_MDS_READY)

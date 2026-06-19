@@ -15,7 +15,7 @@ from constants import (
     LUSTRE_OST_DATASET_PREFIX,
     LUSTRE_OST_MOUNT_DIRECTORY,
 )
-from errors import LustrePeerError
+from errors import LustrePeerError, LustreStateError
 
 if TYPE_CHECKING:
     from charm import LustreCharm
@@ -64,58 +64,6 @@ class CharmStatuses:
         return cls._OSTS_MISSING_TEMPLATE.format(mount_directory=mount_directory)
 
 
-def kernel_modules_status_change(modules_path: str = "/proc/modules") -> ops.BlockedStatus | None:
-    """Check if Lustre and LNet kernel modules are installed on the unit.
-
-    Returns:
-        ``None`` if all required modules are loaded, otherwise a ``BlockedStatus`` describing which
-        modules are missing.
-    """
-    required_modules = {"lustre", "lnet"}
-    loaded_modules = set()
-    try:
-        with open(modules_path, "r") as f:
-            for line in f:
-                # First item on each line is module name
-                split_line = line.split()
-                if split_line:
-                    loaded_modules.add(split_line[0])
-    except OSError as e:
-        _logger.exception("OS error: %s", e)
-        return ops.BlockedStatus(CharmStatuses.modules_path_failure(modules_path))
-
-    missing = required_modules - loaded_modules
-    if missing:
-        # `sorted()` ensures consistent ordering of module names in the status message.
-        return ops.BlockedStatus(CharmStatuses.modules_missing(sorted(missing)))
-    return None
-
-
-def mountpoint_status_change(mountpoint: Path) -> ops.BlockedStatus | None:
-    """Check if a mountpoint is healthy.
-
-    Returns:
-        ``None`` if the mountpoint exists and is mounted, otherwise a ``BlockedStatus`` describing
-        the problem.
-    """
-    if not mountpoint.exists():
-        return ops.BlockedStatus(CharmStatuses.mountpoint_missing(mountpoint))
-    if not mountpoint.is_mount():
-        return ops.BlockedStatus(CharmStatuses.mountpoint_not_mounted(mountpoint))
-    return None
-
-
-def peer_relation_app_data_status_change(data) -> ops.WaitingStatus | None:
-    """Check if MGS peer app data has been published.
-
-    Returns:
-        ``None`` if MGS data is present, otherwise a ``WaitingStatus``.
-    """
-    if data.mgs_unit_name is None or data.mgs_nid is None:
-        return ops.WaitingStatus(CharmStatuses.WAITING_PEER_DATA)
-    return None
-
-
 def check_lustre(charm: "LustreCharm") -> ops.StatusBase:
     """Check health of Lustre services and update unit status."""
     # If any health check fails and unit is already in BlockedStatus, return the existing status.
@@ -130,54 +78,85 @@ def check_lustre(charm: "LustreCharm") -> ops.StatusBase:
         _logger.exception("failed to get peer relation app data: %s", e)
         return existing_error_status or ops.BlockedStatus(CharmStatuses.FAILED_PEER_DATA)
 
-    # Perform checks common to both MGS+MDS and OSS units.
-    if (status := _common_status_change(peer_app_data)) is not None:
-        return existing_error_status or status
-
-    # Perform role-specific checks for MGS+MDS or OSS.
+    # Must determine whether MGS+MDS or OSS-specific checks should be performed.
     if charm.model.unit.name == peer_app_data.mgs_unit_name:
-        role_specific_status_change = _mgs_mds_status_change
+        role_specific_check = _mgs_mds_check
         active_status = ops.ActiveStatus(CharmStatuses.MGS_MDS_READY)
     else:
-        role_specific_status_change = _oss_status_change
+        role_specific_check = _oss_check
         active_status = ops.ActiveStatus(CharmStatuses.OSS_READY)
 
-    if (status := role_specific_status_change()) is not None:
-        return existing_error_status or status
+    try:
+        _common_check(peer_app_data)
+        role_specific_check()
+    except LustreStateError as e:
+        return existing_error_status or e.status
 
     if existing_error_status:
-        _logger.info("all health checks pass. clearing BlockedStatus: %s", existing_error_status)
+        _logger.info("all health checks pass. clearing error status: %s", existing_error_status)
 
     return active_status
 
 
-def _common_status_change(peer_app_data) -> ops.StatusBase | None:
-    """Perform checks common to all Lustre units.
-
-    Returns:
-        ``None`` if all checks pass, otherwise the first non-passing status.
-    """
-    if (status := peer_relation_app_data_status_change(peer_app_data)) is not None:
-        return status
-    if (status := kernel_modules_status_change()) is not None:
-        return status
-    return None
+def _common_check(peer_app_data) -> None:
+    """Perform checks common to all Lustre units.    """
+    _peer_relation_app_data_check(peer_app_data)
+    _kernel_modules_check()
 
 
-def _mgs_mds_status_change() -> ops.StatusBase | None:
+def _peer_relation_app_data_check(data) -> None:
+    """Check if MGS peer app data has been published."""
+    if data.mgs_unit_name is None or data.mgs_nid is None:
+        status = ops.BlockedStatus(CharmStatuses.WAITING_PEER_DATA)
+        raise LustreStateError(status)
+
+
+def _kernel_modules_check(modules_path: str = "/proc/modules") -> None:
+    """Check if Lustre and LNet kernel modules are installed on the unit."""
+    required_modules = {"lustre", "lnet"}
+    loaded_modules = set()
+    try:
+        with open(modules_path, "r") as f:
+            for line in f:
+                # First item on each line is module name
+                split_line = line.split()
+                if split_line:
+                    loaded_modules.add(split_line[0])
+    except OSError as e:
+        _logger.exception("OS error: %s", e)
+        status = ops.BlockedStatus(CharmStatuses.modules_path_failure(modules_path))
+        raise LustreStateError(status)
+
+    missing = required_modules - loaded_modules
+    if missing:
+        # `sorted()` ensures consistent ordering of module names in the status message.
+        status = ops.BlockedStatus(CharmStatuses.modules_missing(sorted(missing)))
+        raise LustreStateError(status)
+
+
+def _mountpoint_check(mountpoint: Path) -> None:
+    """Check if a mountpoint is healthy."""
+    if not mountpoint.exists():
+        status = ops.BlockedStatus(CharmStatuses.mountpoint_missing(mountpoint))
+        raise LustreStateError(status)
+    if not mountpoint.is_mount():
+        status = ops.BlockedStatus(CharmStatuses.mountpoint_not_mounted(mountpoint))
+        raise LustreStateError(status)
+
+
+def _mgs_mds_check() -> None:
     """Perform MGS+MDS unit checks."""
-    return mountpoint_status_change(Path(LUSTRE_MGS_MDT_MOUNTPOINT))
+    _mountpoint_check(Path(LUSTRE_MGS_MDT_MOUNTPOINT))
 
 
-def _oss_status_change(mount_directory: str = LUSTRE_OST_MOUNT_DIRECTORY) -> ops.StatusBase | None:
+def _oss_check(mount_directory: str = LUSTRE_OST_MOUNT_DIRECTORY) -> None:
     """Perform OSS unit checks."""
     # Account for multiple OSTs. Example: /mnt/ost0, /mnt/ost1, etc.
     osts = list(Path(mount_directory).glob(f"{LUSTRE_OST_DATASET_PREFIX}*"))
     if len(osts) == 0:
         _logger.error("no OST mountpoints found in %s", mount_directory)
-        return ops.BlockedStatus(CharmStatuses.osts_missing(mount_directory=mount_directory))
+        status = ops.BlockedStatus(CharmStatuses.osts_missing(mount_directory=mount_directory))
+        raise LustreStateError(status)
 
     for mountpoint in osts:
-        if (status := mountpoint_status_change(mountpoint)) is not None:
-            return status
-    return None
+        _mountpoint_check(mountpoint)

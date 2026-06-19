@@ -5,6 +5,9 @@
 """Exceptions used within the charm."""
 
 
+import ops
+
+
 class LustreError(Exception):
     """Base class for Lustre-related errors."""
 
@@ -19,3 +22,11 @@ class LustrePeerError(LustreError):
     """Raised when a Lustre peer relation operation fails."""
 
     pass
+
+
+class LustreStateError(LustreError):
+    """Raised when a Lustre status check fails, carrying the resulting unit status."""
+
+    def __init__(self, status: ops.StatusBase):
+        super().__init__(status.message)
+        self.status = status
