@@ -101,17 +101,22 @@ def juju(request: pytest.FixtureRequest) -> Iterator[jubilant.Juju]:
                 f"Available profiles: {', '.join(profiles)}"
             )
 
-        subprocess.check_call(
-            [
-                "lxc",
-                "profile",
-                "--project",
+        cmd = [
+            "lxc",
+            "profile",
+            "--project",
+            target[0],
+            "set",
+            target[1],
+        ]
+        try:
+            subprocess.check_call(cmd + ["boot.mode=uefi-nosecureboot"])
+        except subprocess.CalledProcessError:
+            logger.warning(
+                "Failed to set boot.mode=uefi-nosecureboot for LXD profile '%s'. Falling back to security.secureboot=false",
                 target[0],
-                "set",
-                target[1],
-                "boot.mode=uefi-nosecureboot",
-            ]
-        )
+            )
+            subprocess.check_call(cmd + ["security.secureboot=false"])
 
         juju.wait_timeout = 30 * 60
         yield juju
