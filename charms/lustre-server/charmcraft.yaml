@@ -1,0 +1,40 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+# This file configures Charmcraft.
+# See https://documentation.ubuntu.com/charmcraft/stable/reference/files/charmcraft-yaml-file/
+name: lustre-server
+type: charm
+title: Lustre Parallel File System
+summary: Provides the Lustre parallel file system.
+description: |
+  This charm enables the deployment and management of the Lustre parallel file system.
+
+  This single charm provides all Lustre server components: MGS (Management Server), MDS (Metadata
+  Server), and OSS (Object Storage Server) and intelligently provisions each. Storage targets are
+  automatically set up as ZFS-backed pools and datasets. LNet is initialized, providing the network
+  layer.
+
+  It meets the need for a standard, reproducible deployment of Lustre within a Juju environment.
+
+  It is useful for HPC and data-intensive teams looking for a high-throughput, scalable, distributed
+  file system.
+
+# Documentation:
+# https://documentation.ubuntu.com/charmcraft/stable/howto/build-guides/select-platforms/
+base: ubuntu@24.04
+platforms:
+  amd64:
+
+parts:
+  charm: {}
+
+peers:
+  lustre-peer:
+    interface: lustre-peer
+  filesystem-peer:
+    interface: filesystem-peer
+
+provides:
+  filesystem:
+    interface: filesystem_info
