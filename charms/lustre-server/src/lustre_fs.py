@@ -285,8 +285,11 @@ def _ensure_lnet_tcp(interface: str) -> None:
         raise LustreFilesystemError("Failed to configure LNet") from e
 
 
-def _get_default_interface():
+def _get_default_interface() -> str:
     """Return the default network interface name for this unit.
+
+    Returns:
+        The name of the default network interface.
 
     Raises:
         LustreFilesystemError: If querying or parsing the default network interface fails.
