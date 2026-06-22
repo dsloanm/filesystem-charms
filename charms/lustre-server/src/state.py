@@ -19,6 +19,7 @@ from errors import LustrePeerError, LustreStateError
 
 if TYPE_CHECKING:
     from charm import LustreCharm
+    from lustre_peer import LustrePeerAppData
 
 _logger = logging.getLogger(__name__)
 
@@ -108,7 +109,7 @@ def check_lustre(charm: "LustreCharm") -> ops.StatusBase:
     return active_status
 
 
-def _common_check(peer_app_data) -> None:
+def _common_check(peer_app_data: "LustrePeerAppData") -> None:
     """Perform checks common to all Lustre units.
 
     Args:
@@ -118,7 +119,7 @@ def _common_check(peer_app_data) -> None:
     _kernel_modules_check()
 
 
-def _peer_relation_app_data_check(data) -> None:
+def _peer_relation_app_data_check(data: "LustrePeerAppData") -> None:
     """Check if MGS peer app data has been published.
 
     Args:
@@ -128,7 +129,7 @@ def _peer_relation_app_data_check(data) -> None:
         LustreStateError: If the MGS peer app data has not been published.
     """
     if data.mgs_unit_name is None or data.mgs_nid is None:
-        status = ops.BlockedStatus(CharmStatuses.WAITING_PEER_DATA)
+        status = ops.WaitingStatus(CharmStatuses.WAITING_PEER_DATA)
         raise LustreStateError(status)
 
 

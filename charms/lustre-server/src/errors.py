@@ -4,7 +4,6 @@
 
 """Exceptions used within the charm."""
 
-
 import ops
 
 
