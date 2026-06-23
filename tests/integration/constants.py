@@ -3,6 +3,7 @@ MOUNT_PROVIDER = "mount-provider"
 NFS_SERVER_PROXY = "nfs-server-proxy"
 CEPHFS_SERVER_PROXY = "cephfs-server-proxy"
 LUSTRE_SERVER_PROXY = "lustre-server-proxy"
+LUSTRE_SERVER = "lustre-server"
 MOUNT_REQUIRERS = ["srv", "shared"]
 CHARMS = [
     FILESYSTEM_CLIENT,

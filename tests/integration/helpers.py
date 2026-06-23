@@ -7,7 +7,6 @@ import json
 import logging
 import re
 import textwrap
-import time
 from pathlib import Path
 
 import jubilant
@@ -87,62 +86,25 @@ def bootstrap_nfs_server(juju: jubilant.Juju, machine_id: str) -> NfsInfo:
     return NfsInfo(hostname=address, port=None, path="/data")
 
 
-def bootstrap_lustre_server(juju: jubilant.Juju, machine_id: str) -> LustreInfo:
+def bootstrap_lustre_server(
+    juju: jubilant.Juju, lustre_server: str | Path, base: str, machine_id: str
+) -> LustreInfo:
     """Bootstrap a minimal Lustre server in Juju.
 
     Returns:
         LustreInfo: Information to mount the Lustre share.
     """
-    # TODO: temporarily do a manual installation while the Lustre charm is a WIP.
-    juju.deploy("ubuntu", "lustre-server", base="ubuntu@24.04", to=machine_id)
+    # 3 units: 1x MGS+MDS, 2x OSS.
+    juju.deploy(lustre_server, "lustre-server", base=base, num_units=3, to=[machine_id] * 3)
     juju.wait(
         lambda status: jubilant.all_active(status, "lustre-server"),
-        timeout=1000,
+        timeout=2000,
     )
 
     unit = "lustre-server/0"
-
-    _logger.info("Starting Lustre server")
-    juju.exec("add-apt-repository -y ppa:ubuntu-hpc/lustre-2.17", unit=unit)
-    juju.exec("apt update", unit=unit)
-    juju.exec(
-        "DEBIAN_FRONTEND=noninteractive apt -y install "
-        "lustre-server-modules-dkms lustre-server-utils zfsutils-linux",
-        unit=unit,
-        # Compiling the DKMS modules takes a bit longer than 5 minutes...
-        wait=2000,
-    )
-
-    juju.exec("modprobe lustre", unit=unit)
-    try:
-        juju.exec("lnetctl net show --net tcp", unit=unit)
-    except jubilant.TaskError:
-        # tcp possibly does not exist, so create it
-        result = juju.exec("ip -json route show default", unit=unit)
-        default_interface = json.loads(result.stdout)[0]["dev"]
-        juju.exec(f"lnetctl net add --net tcp --if {default_interface}", unit=unit)
-
-    juju.exec("truncate -s 5G /root/mgm.img", unit=unit)
-    juju.exec("truncate -s 10G /root/ost.img", unit=unit)
-    juju.exec(
-        f"mkfs.lustre --mgs --mdt --backfstype=zfs --fsname={LUSTRE_FS_NAME} "
-        "--index=0 --device-size=5120 mgmpool/mgm /root/mgm.img",
-        unit=unit,
-    )
     host = juju.exec("hostname -I", unit=unit).stdout.strip() + "@tcp"
-    juju.exec(
-        f"mkfs.lustre --ost --backfstype=zfs --fsname={LUSTRE_FS_NAME} "
-        f"--mgsnode={host} --device-size=10240 --index=0 ostpool/ost1 /root/ost.img",
-        unit=unit,
-    )
 
-    juju.exec("mkdir -p /mnt/mgm /mnt/ost /mnt/scratch", unit=unit)
-    juju.exec("zfs set quota=4G mgmpool/mgm", unit=unit)
-    juju.exec("zfs set quota=9G ostpool/ost1", unit=unit)
-    time.sleep(10)
-    juju.exec("mount -t lustre mgmpool/mgm /mnt/mgm", unit=unit)
-    juju.exec("mount -t lustre ostpool/ost1 /mnt/ost", unit=unit)
-
+    juju.exec("mkdir -p /mnt/scratch", unit=unit)
     juju.exec(f"mount -t lustre {host}:/{LUSTRE_FS_NAME} /mnt/scratch", unit=unit)
     for i in [1, 2, 3]:
         juju.exec(f"touch /mnt/scratch/test-{i}", unit=unit)

@@ -5,6 +5,7 @@
 """Peer relation observer for the Lustre charm."""
 
 import logging
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 import lustre_fs
@@ -20,6 +21,12 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 PEER_RELATION = "lustre-peer"
+
+
+class CharmStatuses(StrEnum):
+    """Charm status messages."""
+
+    FAILED_OSS_SETUP = "Failed to set up OSS"
 
 
 class LustrePeerAppData(pydantic.BaseModel):
@@ -106,8 +113,14 @@ class LustrePeerObserver(ops.Object):
             # OSS service must not be enabled on MGS+MDS unit
             return
 
-        lustre_fs.oss_setup(LUSTRE_FSNAME, self.model.unit.name, data.mgs_nid)
-        # TODO: Cannot use @refresh decorator here due to `AttributeError: 'LustrePeer' object
+        try:
+            lustre_fs.oss_setup(LUSTRE_FSNAME, self.model.unit.name, data.mgs_nid)
+        except lustre_fs.LustreFilesystemError as e:
+            _logger.exception("failed to set up OSS: %s", e)
+            self.model.unit.status = ops.BlockedStatus(CharmStatuses.FAILED_OSS_SETUP)
+            return
+
+        # FIXME: Cannot use @refresh decorator here due to `AttributeError: 'LustrePeer' object
         # has no attribute 'unit'`. Set status directly for now.
         self.model.unit.status = check_lustre(self._charm)
 

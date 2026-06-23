@@ -5,7 +5,7 @@
 """Check the state of the Lustre charmed operator."""
 
 import logging
-from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,8 +24,7 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class CharmStatuses:
+class CharmStatuses(StrEnum):
     """Charm status messages."""
 
     WAITING_PEER_DATA = "Waiting for MGS unit to publish NID"

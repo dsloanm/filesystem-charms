@@ -10,11 +10,18 @@ import subprocess
 from pathlib import Path
 
 from constants import (
+    IP_EXECUTABLE,
+    LNETCTL_EXECUTABLE,
     LUSTRE_LNET_CONF,
     LUSTRE_MGS_MDT_DATASET_PREFIX,
     LUSTRE_MGS_MDT_MOUNTPOINT,
     LUSTRE_OST_DATASET_PREFIX,
     LUSTRE_OST_PARENT_DIRECTORY,
+    MKFS_LUSTRE_EXECUTABLE,
+    MOUNT_EXECUTABLE,
+    TRUNCATE_EXECUTABLE,
+    ZFS_EXECUTABLE,
+    ZPOOL_EXECUTABLE,
 )
 from errors import LustreFilesystemError
 
@@ -130,8 +137,8 @@ def _detect_devices(owner: str) -> list[str]:
         image = Path(f"/root/{owner}-disk{num}.img")
         if not image.exists():
             try:
-                subprocess.run(["truncate", "-s", "1G", image], check=True)
-            except subprocess.CalledProcessError as e:
+                subprocess.run([TRUNCATE_EXECUTABLE, "-s", "1G", image], check=True)
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
                 raise LustreFilesystemError(f"Failed to create image file {image}") from e
         devices.append(str(image))
 
@@ -157,7 +164,7 @@ def _mgt_mdt_zpool(pool: str, devices: list[str]) -> None:
     if len(devices) % 2 != 0:
         raise ValueError("MGT/MDT mirror pool requires an even number of devices for mirroring.")
 
-    cmd = ["zpool", "create", "-O", "canmount=off", pool]
+    cmd = [ZPOOL_EXECUTABLE, "create", "-O", "canmount=off", pool]
 
     # Break devices into mirror pairs. Example: ["/dev/sda", "/dev/sdb", "/dev/sdc", "/dev/sdd"]
     # becomes ["mirror", "/dev/sda", "/dev/sdb", "mirror", "/dev/sdc", "/dev/sdd"]
@@ -168,7 +175,7 @@ def _mgt_mdt_zpool(pool: str, devices: list[str]) -> None:
     _logger.info("Creating MGT/MDT zpool with command: %s", " ".join(cmd))
     try:
         subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as e:
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
         raise LustreFilesystemError(f"Failed to create MGT/MDT zpool '{pool}'") from e
 
 
@@ -189,12 +196,12 @@ def _ost_zpool(pool: str, devices: list[str]) -> None:
     if len(devices) < 3:
         raise ValueError("OST pool requires at least 3 devices for RAIDZ2.")
 
-    cmd = ["zpool", "create", "-O", "canmount=off", pool, "raidz2"] + devices
+    cmd = [ZPOOL_EXECUTABLE, "create", "-O", "canmount=off", pool, "raidz2"] + devices
 
     _logger.info("Creating OST zpool with command: %s", " ".join(cmd))
     try:
         subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as e:
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
         raise LustreFilesystemError(f"Failed to create OST zpool '{pool}'") from e
 
 
@@ -232,8 +239,8 @@ def _lustre_target(
         f"--index={index}",
     ]
     try:
-        subprocess.run(["mkfs.lustre", *flags, full_dataset_name], check=True)
-    except subprocess.CalledProcessError as e:
+        subprocess.run([MKFS_LUSTRE_EXECUTABLE, *flags, full_dataset_name], check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
         raise LustreFilesystemError(f"Failed to format Lustre target {full_dataset_name}") from e
 
 
@@ -258,8 +265,10 @@ def _mount(pool: str, dataset: str, mountpoint: Path) -> None:
     # TODO: determine whether a timeout should be set here.
     # See: https://wiki.lustre.org/images/5/59/LUG2025-Lustre_Timeout_Hierarchy-Horn.pdf
     try:
-        subprocess.run(["mount", "-t", "lustre", full_dataset_name, str(mountpoint)], check=True)
-    except subprocess.CalledProcessError as e:
+        subprocess.run(
+            [MOUNT_EXECUTABLE, "-t", "lustre", full_dataset_name, str(mountpoint)], check=True
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
         raise LustreFilesystemError(
             f"Failed to mount Lustre target {full_dataset_name} at {mountpoint}"
         ) from e
@@ -275,13 +284,13 @@ def _ensure_lnet_tcp(interface: str) -> None:
         LustreFilesystemError: If configuring the LNet TCP network fails.
     """
     try:
-        result = subprocess.run(["lnetctl", "net", "show", "--net", "tcp"])
+        result = subprocess.run([LNETCTL_EXECUTABLE, "net", "show", "--net", "tcp"])
         if result.returncode != 0:
             subprocess.run(
-                ["lnetctl", "net", "add", "--net", "tcp", "--if", interface], check=True
+                [LNETCTL_EXECUTABLE, "net", "add", "--net", "tcp", "--if", interface], check=True
             )
         # TODO: verify the tcp network is assigned to the correct interface?
-    except subprocess.CalledProcessError as e:
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
         raise LustreFilesystemError("Failed to configure LNet") from e
 
 
@@ -296,9 +305,12 @@ def _get_default_interface() -> str:
     """
     try:
         result = subprocess.run(
-            ["ip", "-json", "route", "show", "default"], capture_output=True, text=True, check=True
+            [IP_EXECUTABLE, "-json", "route", "show", "default"],
+            capture_output=True,
+            text=True,
+            check=True,
         )
-    except subprocess.CalledProcessError as e:
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
         raise LustreFilesystemError("Failed to query default network interface") from e
 
     try:
@@ -321,9 +333,9 @@ def _persist_lnet_config() -> None:
         LustreFilesystemError: If exporting or writing the LNet configuration fails.
     """
     try:
-        result = subprocess.check_output(["lnetctl", "export", "--backup"], text=True)
+        result = subprocess.check_output([LNETCTL_EXECUTABLE, "export", "--backup"], text=True)
         LUSTRE_LNET_CONF.write_text(result)
-    except (subprocess.CalledProcessError, IOError) as e:
+    except (subprocess.CalledProcessError, FileNotFoundError, IOError) as e:
         raise LustreFilesystemError("Failed to write LNet configuration data") from e
 
 
@@ -337,8 +349,10 @@ def _pool_exists(pool: str) -> bool:
         LustreFilesystemError: If checking the zpool existence fails.
     """
     try:
-        return subprocess.run(["zpool", "list", pool], capture_output=True).returncode == 0
-    except subprocess.CalledProcessError as e:
+        return (
+            subprocess.run([ZPOOL_EXECUTABLE, "list", pool], capture_output=True).returncode == 0
+        )
+    except FileNotFoundError as e:
         raise LustreFilesystemError(f"Failed to check zpool '{pool}' existence") from e
 
 
@@ -349,14 +363,17 @@ def _target_exists(full_dataset_name: str) -> bool:
         full_dataset_name: Name of the ZFS dataset to check.
 
     Raises:
-        LustreFilesystemError: If checking the ZFS dataset existence fails.
+        LustreFilesystemError: If checking the zpool existence fails.
     """
     # TODO: handle if the dataset exists but is not formatted as Lustre.
     try:
         return (
-            subprocess.run(["zfs", "list", full_dataset_name], capture_output=True).returncode == 0
+            subprocess.run(
+                [ZFS_EXECUTABLE, "list", full_dataset_name], capture_output=True
+            ).returncode
+            == 0
         )
-    except subprocess.CalledProcessError as e:
+    except FileNotFoundError as e:
         raise LustreFilesystemError(
             f"Failed to check ZFS dataset '{full_dataset_name}' existence"
         ) from e

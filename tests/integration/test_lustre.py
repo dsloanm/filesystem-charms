@@ -6,6 +6,7 @@ import pytest
 from conftest import Machines
 from constants import (
     FILESYSTEM_CLIENT,
+    LUSTRE_SERVER,
     LUSTRE_SERVER_PROXY,
     MOUNT_PROVIDER,
     MOUNT_REQUIRERS,
@@ -18,7 +19,11 @@ pytestmark = pytest.mark.lustre
 
 @pytest.mark.order(20)
 def test_deploy_lustre(
-    juju: jubilant.Juju, base: str, lustre_server_proxy: str | Path, machines: Machines
+    juju: jubilant.Juju,
+    base: str,
+    lustre_server_proxy: str | Path,
+    lustre_server: str | Path,
+    machines: Machines,
 ) -> None:
     """Setup the filesystem charms to mount Lustre filesystems.
 
@@ -45,7 +50,7 @@ def test_deploy_lustre(
     juju.config(MOUNT_PROVIDER, values={"enable-lustre": "true"})
 
     # Bootstrap the Lustre server.
-    lustre_info = bootstrap_lustre_server(juju, machines.storage_machine_id)
+    lustre_info = bootstrap_lustre_server(juju, lustre_server, base, machines.storage_machine_id)
 
     juju.config(
         LUSTRE_SERVER_PROXY,
@@ -60,7 +65,8 @@ def test_deploy_lustre(
 
 
 @pytest.mark.order(21)
-def test_lustre(juju: jubilant.Juju) -> None:
+@pytest.mark.parametrize("server_app", [LUSTRE_SERVER_PROXY, LUSTRE_SERVER])
+def test_lustre(juju: jubilant.Juju, server_app: str) -> None:
     # Reconfigure and integrate with Lustre.
     juju.config(
         FILESYSTEM_CLIENT,
@@ -71,8 +77,8 @@ def test_lustre(juju: jubilant.Juju) -> None:
             "nodev": "true",
         },
     )
-    juju.integrate(f"{FILESYSTEM_CLIENT}:filesystem", f"{LUSTRE_SERVER_PROXY}:filesystem")
-    juju.integrate(f"{MOUNT_PROVIDER}:filesystem", f"{LUSTRE_SERVER_PROXY}:filesystem")
+    juju.integrate(f"{FILESYSTEM_CLIENT}:filesystem", f"{server_app}:filesystem")
+    juju.integrate(f"{MOUNT_PROVIDER}:filesystem", f"{server_app}:filesystem")
     juju.wait(
         lambda status: jubilant.all_active(status, FILESYSTEM_CLIENT, MOUNT_PROVIDER),
         error=lambda status: (
@@ -88,8 +94,8 @@ def test_lustre(juju: jubilant.Juju) -> None:
     for app in MOUNT_REQUIRERS:
         check_files(juju, f"{app}/0", f"/{app}")
 
-    juju.remove_relation(f"{FILESYSTEM_CLIENT}:filesystem", f"{LUSTRE_SERVER_PROXY}:filesystem")
-    juju.remove_relation(f"{MOUNT_PROVIDER}:filesystem", f"{LUSTRE_SERVER_PROXY}:filesystem")
+    juju.remove_relation(f"{FILESYSTEM_CLIENT}:filesystem", f"{server_app}:filesystem")
+    juju.remove_relation(f"{MOUNT_PROVIDER}:filesystem", f"{server_app}:filesystem")
 
     juju.wait(
         lambda status: jubilant.all_blocked(status, FILESYSTEM_CLIENT, MOUNT_PROVIDER),

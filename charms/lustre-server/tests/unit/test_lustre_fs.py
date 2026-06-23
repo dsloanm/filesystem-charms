@@ -10,8 +10,12 @@ from pathlib import Path
 import lustre_fs
 import pytest
 from constants import (
+    LNETCTL_EXECUTABLE,
     LUSTRE_MGS_MDT_DATASET_PREFIX,
     LUSTRE_OST_DATASET_PREFIX,
+    MKFS_LUSTRE_EXECUTABLE,
+    MOUNT_EXECUTABLE,
+    ZPOOL_EXECUTABLE,
 )
 from errors import LustreFilesystemError
 
@@ -119,7 +123,7 @@ class TestEnsureLnetTcp:
 
         assert mock_run.call_count == 2
         add_call = mock_run.call_args_list[1]
-        assert add_call[0][0] == ["lnetctl", "net", "add", "--net", "tcp", "--if", "eth0"]
+        assert add_call[0][0] == [LNETCTL_EXECUTABLE, "net", "add", "--net", "tcp", "--if", "eth0"]
 
     def test_skips_when_exists(self, mocker, mock_run):
         """Skips adding the TCP network when it is already present."""
@@ -129,7 +133,7 @@ class TestEnsureLnetTcp:
 
     def test_lnetctl_failure(self, mocker, mock_run):
         """Lnetctl failure."""
-        mock_run.side_effect = subprocess.CalledProcessError(1, "lnetctl")
+        mock_run.side_effect = subprocess.CalledProcessError(1, LNETCTL_EXECUTABLE)
 
         with pytest.raises(LustreFilesystemError) as excinfo:
             lustre_fs._ensure_lnet_tcp("eth0")
@@ -146,14 +150,14 @@ class TestPersistLnetConfig:
 
         lustre_fs._persist_lnet_config()
 
-        mock_check.assert_called_once_with(["lnetctl", "export", "--backup"], text=True)
+        mock_check.assert_called_once_with([LNETCTL_EXECUTABLE, "export", "--backup"], text=True)
         mock_write.assert_called_once_with("config data")
 
     def test_export_failure(self, mocker):
         """Lnetctl export failure."""
         mocker.patch(
             "lustre_fs.subprocess.check_output",
-            side_effect=subprocess.CalledProcessError(1, "lnetctl"),
+            side_effect=subprocess.CalledProcessError(1, LNETCTL_EXECUTABLE),
         )
 
         with pytest.raises(LustreFilesystemError) as excinfo:
@@ -173,7 +177,7 @@ class TestMgtMdtZpool:
 
         mock_run.assert_called_once()
         expected_cmd = [
-            "zpool",
+            ZPOOL_EXECUTABLE,
             "create",
             "-O",
             "canmount=off",
@@ -232,7 +236,14 @@ class TestOstZpool:
 
         mock_run.assert_called_once()
         actual_cmd = mock_run.call_args[0][0]
-        expected_cmd = ["zpool", "create", "-O", "canmount=off", "testpool", "raidz2"] + devices
+        expected_cmd = [
+            ZPOOL_EXECUTABLE,
+            "create",
+            "-O",
+            "canmount=off",
+            "testpool",
+            "raidz2",
+        ] + devices
         assert actual_cmd == expected_cmd
 
     def test_skips_when_pool_exists(self, mocker, mock_run):
@@ -279,7 +290,7 @@ class TestLustreTarget:
         mock_run.assert_called_once()
         actual_cmd = mock_run.call_args[0][0]
         expected_cmd = [
-            "mkfs.lustre",
+            MKFS_LUSTRE_EXECUTABLE,
             "--mgs",
             "--mdt",
             "--backfstype=zfs",
@@ -322,7 +333,7 @@ class TestMount:
         lustre_fs._mount("pool", "dataset", mountpoint_tmp)
 
         mock_run.assert_called_once_with(
-            ["mount", "-t", "lustre", "pool/dataset", str(mountpoint_tmp)], check=True
+            [MOUNT_EXECUTABLE, "-t", "lustre", "pool/dataset", str(mountpoint_tmp)], check=True
         )
 
     def test_skips_when_already_mounted(self, mocker, mountpoint_tmp, mock_run):
@@ -335,7 +346,7 @@ class TestMount:
 
     def test_mount_failure(self, mocker, mountpoint_tmp, mock_run):
         """Mount command fails."""
-        mock_run.side_effect = subprocess.CalledProcessError(1, "mount")
+        mock_run.side_effect = subprocess.CalledProcessError(1, MOUNT_EXECUTABLE)
 
         with pytest.raises(LustreFilesystemError) as excinfo:
             lustre_fs._mount("pool", "dataset", mountpoint_tmp)
@@ -433,11 +444,11 @@ class TestPoolExists:
 
     def test_zpool_run_error(self, mocker, mock_run):
         """Zpool command fails."""
-        mock_run.side_effect = subprocess.CalledProcessError(1, "zpool")
+        mock_run.side_effect = FileNotFoundError(1, "/bad/path/to/zpool")
 
         with pytest.raises(LustreFilesystemError) as excinfo:
             lustre_fs._pool_exists("mypool")
-        assert isinstance(excinfo.value.__cause__, subprocess.CalledProcessError)
+        assert isinstance(excinfo.value.__cause__, FileNotFoundError)
 
 
 class TestTargetExists:
@@ -453,7 +464,8 @@ class TestTargetExists:
 
     def test_zfs_run_error(self, mocker, mock_run):
         """Zfs command fails."""
-        mock_run.side_effect = subprocess.CalledProcessError(1, "zfs")
+        mock_run.side_effect = FileNotFoundError(1, "/bad/path/to/zfs")
+
         with pytest.raises(LustreFilesystemError) as excinfo:
             lustre_fs._target_exists(self.FULL_DATASET)
-        assert isinstance(excinfo.value.__cause__, subprocess.CalledProcessError)
+        assert isinstance(excinfo.value.__cause__, FileNotFoundError)

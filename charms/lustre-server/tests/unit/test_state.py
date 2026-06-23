@@ -159,7 +159,6 @@ class TestOssStatus:
         expected_status = ops.BlockedStatus(
             CharmStatuses.osts_missing(mount_directory=str(tmp_path))
         )
-        mocker.patch("state._mountpoint_check", side_effect=LustreStateError(expected_status))
 
         with pytest.raises(LustreStateError) as e:
             state._oss_check(mount_directory=str(tmp_path))
@@ -220,7 +219,7 @@ class TestCheckLustre:
         """When common checks fail and unit already Blocked, keep existing status."""
         existing = ops.BlockedStatus("existing error")
         mock_charm.unit.status = existing
-        mocker.patch("state._common_check", return_value=ops.WaitingStatus())
+        mocker.patch("state._common_check", side_effect=LustreStateError(ops.WaitingStatus()))
 
         result = state.check_lustre(mock_charm)
         assert result is existing

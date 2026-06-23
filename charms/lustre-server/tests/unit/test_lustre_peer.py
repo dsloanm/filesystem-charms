@@ -7,6 +7,7 @@ import lustre_peer
 import ops
 import pytest
 from constants import LUSTRE_FSNAME
+from errors import LustreFilesystemError
 
 MGS_UNIT = "lustre/0"
 MGS_NID = "10.0.0.5@tcp"
@@ -133,3 +134,20 @@ class TestOnRelationChanged:
         observer._on_relation_changed(mocker.MagicMock())
 
         mock_oss.assert_not_called()
+
+    def test_oss_setup_failure(self, mocker, mock_model_with_relation):
+        """OSS unit service setup fails."""
+        model, rel = mock_model_with_relation
+        model.unit.name = OSS_UNIT
+        rel.load.return_value = lustre_peer.LustrePeerAppData(
+            mgs_nid=MGS_NID,
+            mgs_unit_name=MGS_UNIT,
+        )
+        mocker.patch(
+            "lustre_peer.lustre_fs.oss_setup", side_effect=LustreFilesystemError("setup failed")
+        )
+
+        observer = lustre_peer.LustrePeerObserver(mocker.MagicMock())
+        observer._on_relation_changed(mocker.MagicMock())
+
+        assert model.unit.status == ops.BlockedStatus(lustre_peer.CharmStatuses.FAILED_OSS_SETUP)

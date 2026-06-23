@@ -6,7 +6,7 @@
 
 import logging
 import platform
-from dataclasses import dataclass
+from enum import StrEnum
 from subprocess import CalledProcessError
 
 import lustre_fs
@@ -30,8 +30,7 @@ logger = logging.getLogger(__name__)
 refresh = refresh(hook=check_lustre)
 
 
-@dataclass(frozen=True)
-class CharmStatuses:
+class CharmStatuses(StrEnum):
     """Charm status messages."""
 
     REPO_SETUP = "Setting up package repository"

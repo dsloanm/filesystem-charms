@@ -50,3 +50,11 @@ fy6i2AnB3kUI27D4HY2YSlXLSRbjiSxTfVwNCzDsIh7Czefsm6ITK2+cVWs0hNQ=
 -----END PGP PUBLIC KEY BLOCK-----
 """
 LUSTRE_REPOSITORY_URI = "https://ppa.launchpadcontent.net/ubuntu-hpc/lustre-2.17/ubuntu/"
+
+IP_EXECUTABLE = "/usr/sbin/ip"
+LNETCTL_EXECUTABLE = "/usr/sbin/lnetctl"
+MKFS_LUSTRE_EXECUTABLE = "/usr/sbin/mkfs.lustre"
+MOUNT_EXECUTABLE = "/usr/bin/mount"
+TRUNCATE_EXECUTABLE = "/usr/bin/truncate"
+ZFS_EXECUTABLE = "/usr/sbin/zfs"
+ZPOOL_EXECUTABLE = "/usr/sbin/zpool"
