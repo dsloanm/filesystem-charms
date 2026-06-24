@@ -6,6 +6,7 @@ dependencies = [
     "ops ~= 3.0",
     "charmlibs-apt ~= 1.0",
     "charmed-hpc-libs[ops] ~= 0.1",
+    "pydantic>=2",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +24,7 @@ dev = [
   "jubilant",
   "pytest ~= 9.0",
   "pytest-order ~= 1.1",
+  "pytest-mock ~= 3.15",
   "tenacity ~= 8.2",
 ]
 
