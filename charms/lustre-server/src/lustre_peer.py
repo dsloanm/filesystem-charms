@@ -11,8 +11,9 @@ from typing import TYPE_CHECKING
 import lustre_fs
 import ops
 import pydantic
+from charms.filesystem_client.v0.filesystem_info import LustreInfo
 from constants import LUSTRE_FSNAME
-from errors import LustrePeerError
+from errors import LustreFilesystemError, LustrePeerError
 from state import check_lustre
 
 if TYPE_CHECKING:
@@ -74,12 +75,17 @@ class LustrePeerObserver(ops.Object):
             )
             return data.mgs_nid
 
-        # NID is <address>@<LND protocol><lnd#>. Example: "10.0.0.5@tcp"
-        mgs_nid = str(self.model.get_binding(PEER_RELATION).network.bind_address) + "@tcp"
+        try:
+            # TODO: support multiple NIDs. MVP scoped to a single NID.
+            mgs_nid = lustre_fs.get_nids()[0]
+        except (LustreFilesystemError, IndexError) as e:
+            raise LustrePeerError("Failed to determine MGS NID") from e
+
         data.mgs_nid = mgs_nid
         data.mgs_unit_name = self.model.unit.name
 
         self.set_app_data(data)
+        self._charm.filesystem.set_info(LustreInfo(mgs_ids=[mgs_nid], fs_name=LUSTRE_FSNAME))
         _logger.info("Published MGS NID %s for unit %s", data.mgs_nid, data.mgs_unit_name)
         return data.mgs_nid
 
@@ -115,7 +121,7 @@ class LustrePeerObserver(ops.Object):
 
         try:
             lustre_fs.oss_setup(LUSTRE_FSNAME, self.model.unit.name, data.mgs_nid)
-        except lustre_fs.LustreFilesystemError as e:
+        except LustreFilesystemError as e:
             _logger.exception("failed to set up OSS: %s", e)
             self.model.unit.status = ops.BlockedStatus(CharmStatuses.FAILED_OSS_SETUP)
             return

@@ -52,6 +52,7 @@ fy6i2AnB3kUI27D4HY2YSlXLSRbjiSxTfVwNCzDsIh7Czefsm6ITK2+cVWs0hNQ=
 LUSTRE_REPOSITORY_URI = "https://ppa.launchpadcontent.net/ubuntu-hpc/lustre-2.17/ubuntu/"
 
 IP_EXECUTABLE = "/usr/sbin/ip"
+LCTL_EXECUTABLE = "/usr/sbin/lctl"
 LNETCTL_EXECUTABLE = "/usr/sbin/lnetctl"
 MKFS_LUSTRE_EXECUTABLE = "/usr/sbin/mkfs.lustre"
 MOUNT_EXECUTABLE = "/usr/bin/mount"

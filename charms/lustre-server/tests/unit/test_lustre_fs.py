@@ -4,12 +4,14 @@
 """Unit tests for lustre_fs.py — Lustre filesystem operations."""
 
 import json
+import stat
 import subprocess
 from pathlib import Path
 
 import lustre_fs
 import pytest
 from constants import (
+    LCTL_EXECUTABLE,
     LNETCTL_EXECUTABLE,
     LUSTRE_MGS_MDT_DATASET_PREFIX,
     LUSTRE_OST_DATASET_PREFIX,
@@ -39,6 +41,38 @@ class TestInit:
 
         mock_ensure.assert_called_once_with("eth0")
         mock_persist.assert_called_once()
+
+
+class TestGetNids:
+    """get_nids() tests."""
+
+    def test_success(self, mocker, mock_run):
+        """Returns a list of NIDs from lctl output."""
+        mock_run.return_value.stdout = "10.0.0.5@tcp\n10.0.0.6@tcp\n"
+
+        assert lustre_fs.get_nids() == ["10.0.0.5@tcp", "10.0.0.6@tcp"]
+
+    def test_empty_output(self, mocker, mock_run):
+        """Returns an empty list when no NIDs are configured."""
+        mock_run.return_value.stdout = ""
+
+        assert lustre_fs.get_nids() == []
+
+    def test_lctl_run_error(self, mocker, mock_run):
+        """Lctl command fails."""
+        mock_run.side_effect = subprocess.CalledProcessError(1, LCTL_EXECUTABLE)
+
+        with pytest.raises(LustreFilesystemError) as excinfo:
+            lustre_fs.get_nids()
+        assert isinstance(excinfo.value.__cause__, subprocess.CalledProcessError)
+
+    def test_lctl_not_found(self, mocker, mock_run):
+        """Lctl executable is not found."""
+        mock_run.side_effect = FileNotFoundError(1, "/bad/path/to/lctl")
+
+        with pytest.raises(LustreFilesystemError) as excinfo:
+            lustre_fs.get_nids()
+        assert isinstance(excinfo.value.__cause__, FileNotFoundError)
 
 
 class TestMgsMdsSetup:
@@ -143,15 +177,16 @@ class TestEnsureLnetTcp:
 class TestPersistLnetConfig:
     """_persist_lnet_config() tests."""
 
-    def test_successful_export(self, mocker):
-        """Exports the LNet configuration to a file."""
-        mock_check = mocker.patch("lustre_fs.subprocess.check_output", return_value="config data")
-        mock_write = mocker.patch.object(Path, "write_text")
+    def test_successful_export(self, mocker, tmp_path):
+        """Exports the LNet configuration to a file with 0600 permissions."""
+        conf_path = tmp_path / "lnet.conf"
+        mocker.patch("lustre_fs.LUSTRE_LNET_CONF", conf_path)
+        mocker.patch("lustre_fs.subprocess.check_output", return_value="config data")
 
         lustre_fs._persist_lnet_config()
 
-        mock_check.assert_called_once_with([LNETCTL_EXECUTABLE, "export", "--backup"], text=True)
-        mock_write.assert_called_once_with("config data")
+        assert conf_path.read_text() == "config data"
+        assert stat.S_IMODE(conf_path.stat().st_mode) == 0o600
 
     def test_export_failure(self, mocker):
         """Lnetctl export failure."""

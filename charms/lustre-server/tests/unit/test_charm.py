@@ -125,21 +125,12 @@ class TestCharmStart:
     def test_leader_initial_deployment(self, ctx, mocker, mock_mgs_mds_setup, mock_peer_observer):
         """Leader with no MGS published: MGS+MDS successful start."""
         nid = "10.0.0.1@tcp"
-
         mock_peer_observer.return_value.get_app_data.return_value = LustrePeerAppData()
         mock_peer_observer.return_value.mgs_nid_published.return_value = nid
-        mock_fs = mocker.patch("charm.FilesystemProvides", autospec=True)
 
         ctx.run(ctx.on.start(), testing.State(leader=True))
 
         mock_mgs_mds_setup.assert_called_once_with(LUSTRE_FSNAME)
-
-        mock_fs_instance = mock_fs.return_value
-        mock_fs_instance.set_info.assert_called_once()
-
-        call_arg = mock_fs_instance.set_info.call_args[0][0]
-        assert call_arg.mgs_ids == [nid]
-        assert call_arg.fs_name == LUSTRE_FSNAME
 
     def test_non_leader_initial_deployment(
         self, ctx, mock_mgs_mds_setup, mock_oss_setup, mock_peer_observer

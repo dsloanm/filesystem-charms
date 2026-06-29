@@ -11,6 +11,7 @@ from pathlib import Path
 
 from constants import (
     IP_EXECUTABLE,
+    LCTL_EXECUTABLE,
     LNETCTL_EXECUTABLE,
     LUSTRE_LNET_CONF,
     LUSTRE_MGS_MDT_DATASET_PREFIX,
@@ -36,6 +37,26 @@ def init() -> None:
     """
     _ensure_lnet_tcp(_get_default_interface())
     _persist_lnet_config()
+
+
+def get_nids() -> list[str]:
+    """Return all Lustre NIDs configured on this unit.
+
+    Returns:
+        A list of NID strings in format <address>@<LND protocol><lnd#>. Example: ["10.0.0.5@tcp"].
+        Empty if no NIDs are configured.
+
+    Raises:
+        LustreFilesystemError: If querying the NIDs fails.
+    """
+    try:
+        result = subprocess.run(
+            [LCTL_EXECUTABLE, "list_nids"], capture_output=True, text=True, check=True
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        raise LustreFilesystemError("Failed to query Lustre NIDs") from e
+
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
 def mgs_mds_setup(fsname: str) -> None:
@@ -113,7 +134,7 @@ def oss_setup(fsname: str, unit_name: str, mgs_nid: str) -> None:
         ) from e
 
     _lustre_target(fsname, pool, dataset, ost_index, mkfs_flags=["--ost", f"--mgsnode={mgs_nid}"])
-    _mount(pool, dataset, Path(f"{LUSTRE_OST_PARENT_DIRECTORY}/{dataset}"))
+    _mount(pool, dataset, Path(LUSTRE_OST_PARENT_DIRECTORY) / dataset)
 
     _logger.info("OST index '%s' for MGS NID '%s' ready", ost_index, mgs_nid)
 
@@ -334,8 +355,15 @@ def _persist_lnet_config() -> None:
     """
     try:
         result = subprocess.check_output([LNETCTL_EXECUTABLE, "export", "--backup"], text=True)
-        LUSTRE_LNET_CONF.write_text(result)
-    except (subprocess.CalledProcessError, FileNotFoundError, IOError) as e:
+
+        # Write to temp file then atomically replace existing config. Avoids leaving partial config
+        # file if write process is interrupted.
+        tmp = LUSTRE_LNET_CONF.with_name(f".{LUSTRE_LNET_CONF.name}.tmp")
+        tmp.unlink(missing_ok=True)  # Clean up any failed previous attempt.
+        tmp.touch(mode=0o600)
+        tmp.write_text(result)
+        tmp.replace(LUSTRE_LNET_CONF)
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError) as e:
         raise LustreFilesystemError("Failed to write LNet configuration data") from e
 
 
@@ -365,14 +393,13 @@ def _target_exists(full_dataset_name: str) -> bool:
     Raises:
         LustreFilesystemError: If checking the zpool existence fails.
     """
-    # TODO: handle if the dataset exists but is not formatted as Lustre.
     try:
-        return (
-            subprocess.run(
-                [ZFS_EXECUTABLE, "list", full_dataset_name], capture_output=True
-            ).returncode
-            == 0
+        result = subprocess.run(
+            [ZFS_EXECUTABLE, "get", "-H", "-o", "value", "lustre:fsname", full_dataset_name],
+            capture_output=True,
+            text=True,
         )
+        return result.returncode == 0 and result.stdout.strip() != "-"
     except FileNotFoundError as e:
         raise LustreFilesystemError(
             f"Failed to check ZFS dataset '{full_dataset_name}' existence"

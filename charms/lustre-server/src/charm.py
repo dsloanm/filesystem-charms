@@ -13,7 +13,7 @@ import lustre_fs
 import ops
 from charmed_hpc_libs.ops import StopCharm, refresh
 from charmlibs import apt
-from charms.filesystem_client.v0.filesystem_info import FilesystemProvides, LustreInfo
+from charms.filesystem_client.v0.filesystem_info import FilesystemProvides
 from constants import (
     FILESYSTEM_PEER_RELATION,
     FILESYSTEM_RELATION,
@@ -27,7 +27,7 @@ from lustre_peer import LustrePeerObserver
 from state import check_lustre
 
 logger = logging.getLogger(__name__)
-refresh = refresh(hook=check_lustre)
+refresh_check_lustre = refresh(hook=check_lustre)
 
 
 class CharmStatuses(StrEnum):
@@ -99,7 +99,7 @@ class LustreCharm(ops.CharmBase):
 
         self.unit.status = ops.MaintenanceStatus(CharmStatuses.PREPARING_SERVICES)
 
-    @refresh
+    @refresh_check_lustre
     def _on_start(self, _: ops.StartEvent):
         """Set up Lustre services."""
         self.unit.status = ops.MaintenanceStatus(CharmStatuses.STARTING_SERVICES)
@@ -119,12 +119,10 @@ class LustreCharm(ops.CharmBase):
                 # Initial leader is MGS+MDS for lifetime of deployment.
                 try:
                     lustre_fs.mgs_mds_setup(LUSTRE_FSNAME)
-                    mgs_nid = self.peers.mgs_nid_published()
+                    self.peers.mgs_nid_published()
                 except (LustrePeerError, LustreFilesystemError) as e:
                     logger.exception("failed to set up MGS+MDS: %s", e)
                     raise StopCharm(ops.BlockedStatus(CharmStatuses.FAILED_MGS_MDS_SETUP))
-
-                self.filesystem.set_info(LustreInfo(mgs_ids=[mgs_nid], fs_name=LUSTRE_FSNAME))
 
             # Initial non-leaders are OSSes and must wait for leader to publish MGS info in the peer
             # relation before starting.
@@ -142,7 +140,7 @@ class LustreCharm(ops.CharmBase):
             logger.exception("failed to set up Lustre services: %s", e)
             raise StopCharm(ops.BlockedStatus(CharmStatuses.FAILED_SERVICE_SETUP))
 
-    @refresh
+    @refresh_check_lustre
     def _on_update_status(self, _: ops.UpdateStatusEvent) -> None:
         """Check the health of Lustre services and update unit status."""
 

@@ -12,7 +12,6 @@ from errors import LustreFilesystemError
 MGS_UNIT = "lustre/0"
 MGS_NID = "10.0.0.5@tcp"
 OSS_UNIT = "lustre/1"
-BIND_IP = "10.0.0.5"
 
 
 @pytest.fixture(scope="function")
@@ -43,16 +42,17 @@ class TestMgsNidPublished:
         model, rel = mock_model_with_relation
         model.unit.is_leader.return_value = True
         model.unit.name = MGS_UNIT
-        model.get_binding.return_value.network.bind_address = BIND_IP
         rel.load.return_value = None
+        mocker.patch("lustre_peer.lustre_fs.oss_setup")
+        mocker.patch("lustre_peer.lustre_fs.get_nids", return_value=[MGS_NID])
 
         observer = lustre_peer.LustrePeerObserver(mocker.MagicMock())
         result = observer.mgs_nid_published()
 
-        assert result == f"{BIND_IP}@tcp"
+        assert result == MGS_NID
         rel.save.assert_called_once()
         saved = rel.save.call_args[0][0]
-        assert saved.mgs_nid == f"{BIND_IP}@tcp"
+        assert saved.mgs_nid == MGS_NID
         assert saved.mgs_unit_name == MGS_UNIT
 
     def test_non_leader_raises(self, mocker, mock_model):
@@ -61,6 +61,22 @@ class TestMgsNidPublished:
 
         observer = lustre_peer.LustrePeerObserver(mocker.MagicMock())
         with pytest.raises(lustre_peer.LustrePeerError, match="Non-leader"):
+            observer.mgs_nid_published()
+
+    def test_get_nid_fails(self, mocker, mock_model_with_relation):
+        """Leader unit raises an error when get_nids() fails."""
+        model, rel = mock_model_with_relation
+        model.unit.is_leader.return_value = True
+        model.unit.name = MGS_UNIT
+        rel.load.return_value = None
+        mocker.patch("lustre_peer.lustre_fs.oss_setup")
+        mocker.patch(
+            "lustre_peer.lustre_fs.get_nids",
+            side_effect=LustreFilesystemError("test get_nids failed"),
+        )
+
+        observer = lustre_peer.LustrePeerObserver(mocker.MagicMock())
+        with pytest.raises(lustre_peer.LustrePeerError, match="Failed to determine MGS NID"):
             observer.mgs_nid_published()
 
     def test_nid_already_published(self, mocker, mock_model_with_relation):

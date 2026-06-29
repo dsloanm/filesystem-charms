@@ -194,7 +194,7 @@ def _oss_check(mount_directory: str = LUSTRE_OST_PARENT_DIRECTORY) -> None:
         LustreStateError: If any OST mountpoint is missing or not mounted.
     """
     # Account for multiple OSTs. Example: /mnt/ost0, /mnt/ost1, etc.
-    osts = list(Path(mount_directory).glob(f"{LUSTRE_OST_DATASET_PREFIX}*"))
+    osts = list(Path(mount_directory).glob(f"{LUSTRE_OST_DATASET_PREFIX}[0-9]*"))
     if len(osts) == 0:
         _logger.error("no OST mountpoints found in %s", mount_directory)
         status = ops.BlockedStatus(CharmStatuses.osts_missing(mount_directory=mount_directory))

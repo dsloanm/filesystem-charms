@@ -130,7 +130,7 @@ def juju(request: pytest.FixtureRequest) -> Iterator[jubilant.Juju]:
 
 @pytest.fixture(scope="module")
 def base(request: pytest.FixtureRequest) -> str:
-    """Get the base to deploy the Slurm charms on."""
+    """Get the base to deploy the filesystem-charms charms on."""
     return request.config.getoption("--charm-base")
 
 
