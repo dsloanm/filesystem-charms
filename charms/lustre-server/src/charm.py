@@ -133,8 +133,8 @@ class LustreCharm(ops.CharmBase):
             if self.model.unit.name == mgs_unit:
                 lustre_fs.mgs_mds_setup(LUSTRE_FSNAME)
             else:
-                # OSS can start immediately if MGS info is already available. No need to wait for a peer
-                # relation event.
+                # If this is a slow initial deployment, OSS will still need to wait for the peer
+                # relation event that marks itself ready before any filesystem info is published.
                 lustre_fs.oss_setup(LUSTRE_FSNAME, self.model.unit.name, mgs_nid)
         except LustreFilesystemError as e:
             logger.exception("failed to set up Lustre services: %s", e)
