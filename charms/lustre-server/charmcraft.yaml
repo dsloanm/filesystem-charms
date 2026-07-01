@@ -1,8 +1,6 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-# This file configures Charmcraft.
-# See https://documentation.ubuntu.com/charmcraft/stable/reference/files/charmcraft-yaml-file/
 name: lustre-server
 type: charm
 title: Lustre Parallel File System
@@ -20,8 +18,6 @@ description: |
   It is useful for HPC and data-intensive teams looking for a high-throughput, scalable, distributed
   file system.
 
-# Documentation:
-# https://documentation.ubuntu.com/charmcraft/stable/howto/build-guides/select-platforms/
 base: ubuntu@24.04
 platforms:
   amd64:
