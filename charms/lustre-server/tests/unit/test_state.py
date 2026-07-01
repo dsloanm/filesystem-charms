@@ -177,75 +177,74 @@ class TestCheckLustre:
         charm.peers.get_app_data.return_value = data
         return charm
 
-    def test_mgs_mds_healthy(self, mocker, mock_charm):
-        """MGS+MDS unit, all checks pass."""
-        # Match mgs_unit_name in peer data.
+    @pytest.fixture
+    def mgs_mds_unit(self, mocker, mock_charm):
+        """Mock charm configured as the MGS+MDS unit with common checks passing."""
         mock_charm.model.unit.name = "lustre/0"
-
         mocker.patch("state._common_check", return_value=None)
+        return mock_charm
+
+    @pytest.fixture
+    def oss_unit(self, mocker, mock_charm):
+        """Mock charm configured as an OSS unit with common checks passing."""
+        mock_charm.model.unit.name = "lustre/1"
+        mocker.patch("state._common_check", return_value=None)
+        return mock_charm
+
+    @pytest.fixture
+    def existing_blocked(self, mock_charm):
+        """Set mock charm to an existing BlockedStatus and return that status."""
+        existing = ops.BlockedStatus("existing error")
+        mock_charm.unit.status = existing
+        return existing
+
+    def test_mgs_mds_healthy(self, mocker, mgs_mds_unit):
+        """MGS+MDS unit, all checks pass."""
         mocker.patch("state._mgs_mds_check", return_value=None)
 
-        result = state.check_lustre(mock_charm)
+        result = state.check_lustre(mgs_mds_unit)
         assert result == ops.ActiveStatus(CharmStatuses.MGS_MDS_READY)
 
-    def test_oss_healthy(self, mocker, mock_charm):
+    def test_oss_healthy(self, mocker, oss_unit):
         """OSS unit, all checks pass."""
-        # Does NOT match mgs_unit_name in peer data.
-        mock_charm.model.unit.name = "lustre/1"
-
-        mocker.patch("state._common_check", return_value=None)
         mocker.patch("state._oss_check", return_value=None)
 
-        result = state.check_lustre(mock_charm)
+        result = state.check_lustre(oss_unit)
         assert result == ops.ActiveStatus(CharmStatuses.OSS_READY)
 
-    def test_peer_error(self, mocker, mock_charm):
+    def test_peer_error(self, mock_charm):
         """Peer data retrieval fails."""
         mock_charm.peers.get_app_data.side_effect = LustrePeerError()
 
         result = state.check_lustre(mock_charm)
         assert result == ops.BlockedStatus(CharmStatuses.FAILED_PEER_DATA)
 
-    def test_peer_error_preserve_existing(self, mocker, mock_charm):
+    def test_peer_error_preserve_existing(self, existing_blocked, mock_charm):
         """When peer data retrieval fails and unit already Blocked, keep existing status."""
-        existing = ops.BlockedStatus("existing error")
-        mock_charm.unit.status = existing
         mock_charm.peers.get_app_data.side_effect = LustrePeerError()
 
         result = state.check_lustre(mock_charm)
-        assert result is existing
+        assert result is existing_blocked
 
-    def test_common_error_preserve_existing(self, mocker, mock_charm):
+    def test_common_error_preserve_existing(self, mocker, existing_blocked, mock_charm):
         """When common checks fail and unit already Blocked, keep existing status."""
-        existing = ops.BlockedStatus("existing error")
-        mock_charm.unit.status = existing
         mocker.patch("state._common_check", side_effect=LustreStateError(ops.WaitingStatus()))
 
         result = state.check_lustre(mock_charm)
-        assert result is existing
+        assert result is existing_blocked
 
-    def test_mgs_mds_error_preserve_existing(self, mocker, mock_charm):
+    def test_mgs_mds_error_preserve_existing(self, mocker, mgs_mds_unit, existing_blocked):
         """When a check fails and unit was Blocked, keep existing status."""
-        # Match mgs_unit_name in peer data.
-        mock_charm.model.unit.name = "lustre/0"
-        existing = ops.BlockedStatus("existing error")
-        mock_charm.unit.status = existing
-        mocker.patch("state._common_check", return_value=None)
         mocker.patch(
             "state._mgs_mds_check", side_effect=LustreStateError(ops.BlockedStatus("new"))
         )
 
-        result = state.check_lustre(mock_charm)
-        assert result is existing
+        result = state.check_lustre(mgs_mds_unit)
+        assert result is existing_blocked
 
-    def test_mgs_mds_clears_blocked_when_all_healthy(self, mocker, mock_charm):
+    def test_mgs_mds_clears_blocked_when_all_healthy(self, mocker, mgs_mds_unit, existing_blocked):
         """When checks pass and unit was Blocked, clear to ActiveStatus."""
-        # Match mgs_unit_name in peer data.
-        mock_charm.model.unit.name = "lustre/0"
-        existing = ops.BlockedStatus("existing error")
-        mock_charm.unit.status = existing
-        mocker.patch("state._common_check", return_value=None)
         mocker.patch("state._mgs_mds_check", return_value=None)
 
-        result = state.check_lustre(mock_charm)
+        result = state.check_lustre(mgs_mds_unit)
         assert result == ops.ActiveStatus(CharmStatuses.MGS_MDS_READY)

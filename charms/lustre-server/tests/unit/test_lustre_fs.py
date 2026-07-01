@@ -28,6 +28,18 @@ def mock_run(mocker):
     return mocker.patch("lustre_fs.subprocess.run")
 
 
+@pytest.fixture
+def pool_missing(mocker):
+    """Mock _pool_exists to return False."""
+    mocker.patch("lustre_fs._pool_exists", return_value=False)
+
+
+@pytest.fixture
+def pool_exists(mocker):
+    """Mock _pool_exists to return True."""
+    mocker.patch("lustre_fs._pool_exists", return_value=True)
+
+
 class TestInit:
     """init() tests."""
 
@@ -203,10 +215,8 @@ class TestPersistLnetConfig:
 class TestMgtMdtZpool:
     """_mgt_mdt_zpool() tests."""
 
-    def test_creates_mirror_pool(self, mocker, mock_run):
+    def test_creates_mirror_pool(self, pool_missing, mock_run):
         """Creates a mirrored zpool with the given devices."""
-        mocker.patch("lustre_fs._pool_exists", return_value=False)
-
         devices = ["/dev/sda", "/dev/sdb", "/dev/sdc", "/dev/sdd"]
         lustre_fs._mgt_mdt_zpool("testpool", devices)
 
@@ -227,31 +237,24 @@ class TestMgtMdtZpool:
         actual_cmd = mock_run.call_args[0][0]
         assert actual_cmd == expected_cmd
 
-    def test_skips_when_pool_exists(self, mocker, mock_run):
+    def test_skips_when_pool_exists(self, pool_exists, mock_run):
         """Skips creating the zpool when it already exists."""
-        mocker.patch("lustre_fs._pool_exists", return_value=True)
-
         lustre_fs._mgt_mdt_zpool("testpool", ["/dev/sda", "/dev/sdb"])
 
         mock_run.assert_not_called()
 
-    def test_odd_device_count(self, mocker):
+    def test_odd_device_count(self, pool_missing):
         """Error when an odd number of devices is provided for mirroring."""
-        mocker.patch("lustre_fs._pool_exists", return_value=False)
-
         with pytest.raises(ValueError, match="even number"):
             lustre_fs._mgt_mdt_zpool("testpool", ["/dev/sda", "/dev/sdb", "/dev/sdc"])
 
-    def test_not_enough_devices(self, mocker):
+    def test_not_enough_devices(self, pool_missing):
         """Error when fewer than 2 devices are provided for mirroring."""
-        mocker.patch("lustre_fs._pool_exists", return_value=False)
-
         with pytest.raises(ValueError, match="at least 2"):
             lustre_fs._mgt_mdt_zpool("testpool", ["/dev/sda"])
 
-    def test_zpool_run_error(self, mocker, mock_run):
+    def test_zpool_run_error(self, pool_missing, mock_run):
         """Zpool command fails."""
-        mocker.patch("lustre_fs._pool_exists", return_value=False)
         mock_run.side_effect = subprocess.CalledProcessError(1, "zpool")
 
         with pytest.raises(LustreFilesystemError) as excinfo:
@@ -262,10 +265,8 @@ class TestMgtMdtZpool:
 class TestOstZpool:
     """_ost_zpool() tests."""
 
-    def test_creates_raidz2_pool(self, mocker, mock_run):
+    def test_creates_raidz2_pool(self, pool_missing, mock_run):
         """Creates a raidz2 zpool with the given devices."""
-        mocker.patch("lustre_fs._pool_exists", return_value=False)
-
         devices = ["/dev/sda", "/dev/sdb", "/dev/sdc"]
         lustre_fs._ost_zpool("testpool", devices)
 
@@ -281,24 +282,19 @@ class TestOstZpool:
         ] + devices
         assert actual_cmd == expected_cmd
 
-    def test_skips_when_pool_exists(self, mocker, mock_run):
+    def test_skips_when_pool_exists(self, pool_exists, mock_run):
         """Skips creating the zpool when it already exists."""
-        mocker.patch("lustre_fs._pool_exists", return_value=True)
-
         lustre_fs._ost_zpool("testpool", ["/dev/sda", "/dev/sdb", "/dev/sdc"])
 
         mock_run.assert_not_called()
 
-    def test_not_enough_devices(self, mocker):
+    def test_not_enough_devices(self, pool_missing):
         """Error when fewer than 3 devices are provided for raidz2."""
-        mocker.patch("lustre_fs._pool_exists", return_value=False)
-
         with pytest.raises(ValueError, match="at least 3"):
             lustre_fs._ost_zpool("testpool", ["/dev/sda", "/dev/sdb"])
 
-    def test_zpool_run_error(self, mocker, mock_run):
+    def test_zpool_run_error(self, pool_missing, mock_run):
         """Zpool command fails."""
-        mocker.patch("lustre_fs._pool_exists", return_value=False)
         mock_run.side_effect = subprocess.CalledProcessError(1, "zpool")
 
         with pytest.raises(LustreFilesystemError) as excinfo:
@@ -314,10 +310,18 @@ class TestLustreTarget:
     DATASET = "mgsmdt0"
     FULL_DATASET = f"{POOL}/{DATASET}"
 
-    def test_successful_format(self, mocker, mock_run):
-        """Formats the Lustre target with the correct command and flags."""
+    @pytest.fixture
+    def target_missing(self, mocker):
+        """Mock _target_exists to return False."""
         mocker.patch("lustre_fs._target_exists", return_value=False)
 
+    @pytest.fixture
+    def target_exists(self, mocker):
+        """Mock _target_exists to return True."""
+        mocker.patch("lustre_fs._target_exists", return_value=True)
+
+    def test_successful_format(self, target_missing, mock_run):
+        """Formats the Lustre target with the correct command and flags."""
         lustre_fs._lustre_target(
             self.FSNAME, self.POOL, self.DATASET, 0, mkfs_flags=["--mgs", "--mdt"]
         )
@@ -335,19 +339,16 @@ class TestLustreTarget:
         ]
         assert actual_cmd == expected_cmd
 
-    def test_skips_when_target_exists(self, mocker, mock_run):
+    def test_skips_when_target_exists(self, target_exists, mock_run):
         """Skips formatting the Lustre target when it already exists."""
-        mocker.patch("lustre_fs._target_exists", return_value=True)
-
         lustre_fs._lustre_target(
             self.FSNAME, self.POOL, self.DATASET, 0, mkfs_flags=["--mgs", "--mdt"]
         )
 
         mock_run.assert_not_called()
 
-    def test_mkfs_failure(self, mocker, mock_run):
+    def test_mkfs_failure(self, target_missing, mock_run):
         """mkfs.lustre command fails."""
-        mocker.patch("lustre_fs._target_exists", return_value=False)
         mock_run.side_effect = subprocess.CalledProcessError(1, "mkfs.lustre")
 
         with pytest.raises(LustreFilesystemError) as excinfo:

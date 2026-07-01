@@ -27,6 +27,11 @@ class TestCharmInstall:
     """Install handler tests."""
 
     @pytest.fixture(scope="function")
+    def mock_apt(self, mocker):
+        """Mock apt module."""
+        return mocker.patch("charm.apt", autospec=True)
+
+    @pytest.fixture(scope="function")
     def mock_os_release(self, mocker):
         """Mock platform.freedesktop_os_release."""
         return mocker.patch(
@@ -38,10 +43,8 @@ class TestCharmInstall:
         """Mock lustre_fs.init."""
         return mocker.patch("charm.lustre_fs.init", autospec=True)
 
-    def test_success(self, ctx, mocker, mock_os_release, mock_lustre_init):
+    def test_success(self, ctx, mocker, mock_apt, mock_os_release, mock_lustre_init):
         """Successful install."""
-        mocker.patch("charm.apt")
-
         out = ctx.run(ctx.on.install(), testing.State())
         assert out.unit_status == testing.MaintenanceStatus(charm.CharmStatuses.PREPARING_SERVICES)
 
@@ -63,12 +66,9 @@ class TestCharmInstall:
         out = ctx.run(ctx.on.install(), testing.State())
         assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_IMPORT_GPG_KEY)
 
-    def test_repo_update_error(self, ctx, mocker, mock_os_release, mock_lustre_init):
+    def test_repo_update_error(self, ctx, mocker, mock_apt, mock_os_release, mock_lustre_init):
         """Repository update fails."""
-        mocker.patch("charm.apt.RepositoryMapping")
-        mocker.patch("charm.apt.DebianRepository")
-
-        mocker.patch("charm.apt.update", side_effect=CalledProcessError(1, "bad cmd"))
+        mock_apt.update.side_effect = CalledProcessError(1, "bad cmd")
 
         out = ctx.run(ctx.on.install(), testing.State())
         assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_ADD_REPO)
@@ -85,10 +85,8 @@ class TestCharmInstall:
         expected_message = charm.CharmStatuses.failed_install(LUSTRE_PACKAGES)
         assert out.unit_status == testing.BlockedStatus(expected_message)
 
-    def test_lustre_init_error(self, ctx, mocker, mock_os_release, mock_lustre_init):
+    def test_lustre_init_error(self, ctx, mocker, mock_apt, mock_os_release, mock_lustre_init):
         """Lustre init fails."""
-        mocker.patch("charm.apt")
-
         mock_lustre_init.side_effect = LustreFilesystemError("")
 
         out = ctx.run(ctx.on.install(), testing.State())
