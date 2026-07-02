@@ -125,7 +125,7 @@ def bootstrap_microceph(juju: jubilant.Juju, machine_id: str) -> CephfsInfo:
         "microceph",
         "microceph",
         base="ubuntu@24.04",
-        channel="squid/beta",
+        channel="squid/stable",
         num_units=1,
         storage={"osd-standalone": "loop,3,1G"},
         to=machine_id,
