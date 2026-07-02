@@ -41,3 +41,6 @@ LUSTRE_PACKAGES = (
     "lustre-client-utils",
     "lustre-client-modules-dkms",
 )
+
+IP_EXECUTABLE = "/usr/sbin/ip"
+LNETCTL_EXECUTABLE = "/usr/sbin/lnetctl"
