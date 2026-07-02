@@ -3,11 +3,14 @@
 
 """Lustre peer relation observer unit tests."""
 
+from unittest.mock import MagicMock
+
 import lustre_peer
 import ops
 import pytest
 from constants import LUSTRE_FSNAME
 from errors import LustreFilesystemError
+from pytest_mock import MockerFixture
 
 MGS_UNIT_NAME = "lustre/0"
 MGS_NID = "10.0.0.5@tcp"
@@ -15,7 +18,7 @@ OSS_UNIT_NAME = "lustre/1"
 
 
 @pytest.fixture(scope="function")
-def mock_model(mocker):
+def mock_model(mocker: MockerFixture) -> MagicMock:
     """Mock LustrePeerObserver.model."""
     model = mocker.MagicMock()
     mocker.patch.object(
@@ -28,7 +31,9 @@ def mock_model(mocker):
 
 
 @pytest.fixture(scope="function")
-def mock_model_with_relation(mock_model, mocker):
+def mock_model_with_relation(
+    mock_model: MagicMock, mocker: MockerFixture
+) -> tuple[MagicMock, MagicMock]:
     """_model with a mocked get_relation."""
     rel = mock_model.get_relation.return_value = mocker.MagicMock()
     return mock_model, rel
@@ -37,7 +42,9 @@ def mock_model_with_relation(mock_model, mocker):
 class TestMgsNidPublished:
     """mgs_nid_published() tests."""
 
-    def test_leader_publishes_nid(self, mocker, mock_model_with_relation):
+    def test_leader_publishes_nid(
+        self, mocker: MockerFixture, mock_model_with_relation: tuple[MagicMock, MagicMock]
+    ) -> None:
         """Leader unit publishes MGS NID to relation data."""
         model, rel = mock_model_with_relation
         model.app.planned_units.return_value = 1
@@ -60,7 +67,7 @@ class TestMgsNidPublished:
         assert app_data.mgs_nid == MGS_NID
         assert app_data.mgs_unit_name == MGS_UNIT_NAME
 
-    def test_non_leader_raises(self, mocker, mock_model):
+    def test_non_leader_raises(self, mocker: MockerFixture, mock_model: MagicMock) -> None:
         """Non-leader unit raises an error when publishing MGS NID."""
         mock_model.unit.is_leader.return_value = False
 
@@ -68,7 +75,9 @@ class TestMgsNidPublished:
         with pytest.raises(lustre_peer.LustrePeerError, match="Non-leader"):
             observer.mgs_nid_published()
 
-    def test_get_nid_fails(self, mocker, mock_model_with_relation):
+    def test_get_nid_fails(
+        self, mocker: MockerFixture, mock_model_with_relation: tuple[MagicMock, MagicMock]
+    ) -> None:
         """Leader unit raises an error when get_nids() fails."""
         model, rel = mock_model_with_relation
         model.unit.is_leader.return_value = True
@@ -84,7 +93,9 @@ class TestMgsNidPublished:
         with pytest.raises(lustre_peer.LustrePeerError, match="Failed to determine MGS NID"):
             observer.mgs_nid_published()
 
-    def test_nid_already_published(self, mocker, mock_model_with_relation):
+    def test_nid_already_published(
+        self, mocker: MockerFixture, mock_model_with_relation: tuple[MagicMock, MagicMock]
+    ) -> None:
         """Leader unit does not overwrite existing MGS NID in relation data."""
         model, rel = mock_model_with_relation
         model.unit.is_leader.return_value = True
@@ -102,7 +113,9 @@ class TestOnRelationChanged:
     """_on_relation_changed() tests."""
 
     @pytest.fixture
-    def oss_unit(self, mocker, mock_model):
+    def oss_unit(
+        self, mocker: MockerFixture, mock_model: MagicMock
+    ) -> tuple[MagicMock, MagicMock]:
         """Model of an OSS unit with MGS data published and oss_setup mocked."""
         mock_model.app.planned_units.return_value = 1
         mock_model.unit.name = OSS_UNIT_NAME
@@ -116,7 +129,9 @@ class TestOnRelationChanged:
         return mock_model, mock_oss
 
     @pytest.mark.parametrize("is_leader", [True, False], ids=["leader", "non-leader"])
-    def test_oss_unit_setup(self, mocker, oss_unit, is_leader):
+    def test_oss_unit_setup(
+        self, mocker: MockerFixture, oss_unit: tuple[MagicMock, MagicMock], is_leader: bool
+    ) -> None:
         """OSS unit sets up correctly when relation data is available."""
         mock_model, mock_oss = oss_unit
         mock_model.unit.is_leader.return_value = is_leader
@@ -130,7 +145,7 @@ class TestOnRelationChanged:
         mock_oss.assert_called_once_with(LUSTRE_FSNAME, OSS_UNIT_NAME, MGS_NID)
         assert mock_model.unit.status == expected_status
 
-    def test_app_data_error(self, mocker, mock_model):
+    def test_app_data_error(self, mocker: MockerFixture, mock_model: MagicMock) -> None:
         """OSS unit does not set up when relation data is unavailable."""
         mock_model.get_relation.return_value = None
         mock_oss = mocker.patch("lustre_peer.lustre_fs.oss_setup", autospec=True)
@@ -140,7 +155,9 @@ class TestOnRelationChanged:
 
         mock_oss.assert_not_called()
 
-    def test_mgs_data_not_published(self, mocker, mock_model_with_relation):
+    def test_mgs_data_not_published(
+        self, mocker: MockerFixture, mock_model_with_relation: tuple[MagicMock, MagicMock]
+    ) -> None:
         """OSS unit does not set up when MGS NID is not published."""
         _, rel = mock_model_with_relation
         rel.load.return_value = None
@@ -151,7 +168,7 @@ class TestOnRelationChanged:
 
         mock_oss.assert_not_called()
 
-    def test_mgs_unit_skips_oss(self, mocker, mock_model):
+    def test_mgs_unit_skips_oss(self, mocker: MockerFixture, mock_model: MagicMock) -> None:
         """MGS unit does not attempt to set up OSS."""
         mock_model.app.planned_units.return_value = 1
         mock_model.unit.name = MGS_UNIT_NAME
@@ -164,7 +181,9 @@ class TestOnRelationChanged:
 
         mock_oss.assert_not_called()
 
-    def test_oss_setup_failure(self, mocker, oss_unit):
+    def test_oss_setup_failure(
+        self, mocker: MockerFixture, oss_unit: tuple[MagicMock, MagicMock]
+    ) -> None:
         """OSS service setup fails."""
         model, mock_oss = oss_unit
         mock_oss.side_effect = LustreFilesystemError("setup failed")
@@ -174,7 +193,9 @@ class TestOnRelationChanged:
 
         assert model.unit.status == ops.BlockedStatus(lustre_peer.CharmStatuses.FAILED_OSS_SETUP)
 
-    def test_set_unit_ready_failure(self, mocker, oss_unit):
+    def test_set_unit_ready_failure(
+        self, mocker: MockerFixture, oss_unit: tuple[MagicMock, MagicMock]
+    ) -> None:
         """OSS unit fails to set itself ready."""
         model, _ = oss_unit
         mocker.patch(
@@ -189,7 +210,9 @@ class TestOnRelationChanged:
             lustre_peer.CharmStatuses.FAILED_SET_UNIT_READY
         )
 
-    def test_publish_filesystem_info_failure(self, mocker, oss_unit):
+    def test_publish_filesystem_info_failure(
+        self, mocker: MockerFixture, oss_unit: tuple[MagicMock, MagicMock]
+    ) -> None:
         """Leader OSS unit filesystem info publishing attempt fails."""
         model, _ = oss_unit
         model.unit.is_leader.return_value = True
@@ -210,7 +233,9 @@ class TestOnRelationChanged:
 class TestGetUnitData:
     """get_unit_data() tests."""
 
-    def test_decodes_unquoted_values(self, mocker, mock_model_with_relation):
+    def test_decodes_unquoted_values(
+        self, mocker: MockerFixture, mock_model_with_relation: tuple[MagicMock, MagicMock]
+    ) -> None:
         """get_unit_data decoder wraps unquoted databag values before json.loads."""
         _, rel = mock_model_with_relation
         captured = {}
@@ -236,7 +261,9 @@ class TestGetUnitData:
 class TestTryPublishFilesystemInfo:
     """_try_publish_filesystem_info() tests."""
 
-    def test_publishes_when_all_units_ready(self, mocker, mock_model):
+    def test_publishes_when_all_units_ready(
+        self, mocker: MockerFixture, mock_model: MagicMock
+    ) -> None:
         """Leader publishes filesystem info once all planned units report ready."""
         mock_model.app.planned_units.return_value = 1
         mock_model.unit.name = MGS_UNIT_NAME
