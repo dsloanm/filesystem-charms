@@ -34,6 +34,9 @@ LOCAL_LUSTRE_SERVER_PROXY = (
     if (lustre_server_proxy := os.getenv("LOCAL_LUSTRE_SERVER_PROXY"))
     else None
 )
+LOCAL_LUSTRE_SERVER = (
+    Path(lustre_server) if (lustre_server := os.getenv("LOCAL_LUSTRE_SERVER")) else None
+)
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -101,17 +104,22 @@ def juju(request: pytest.FixtureRequest) -> Iterator[jubilant.Juju]:
                 f"Available profiles: {', '.join(profiles)}"
             )
 
-        subprocess.check_call(
-            [
-                "lxc",
-                "profile",
-                "--project",
+        cmd = [
+            "lxc",
+            "profile",
+            "--project",
+            target[0],
+            "set",
+            target[1],
+        ]
+        try:
+            subprocess.check_call(cmd + ["boot.mode=uefi-nosecureboot"])
+        except subprocess.CalledProcessError:
+            logger.warning(
+                "Failed to set boot.mode=uefi-nosecureboot for LXD profile '%s'. Falling back to security.secureboot=false",
                 target[0],
-                "set",
-                target[1],
-                "boot.mode=uefi-nosecureboot",
-            ]
-        )
+            )
+            subprocess.check_call(cmd + ["security.secureboot=false"])
 
         juju.wait_timeout = 30 * 60
         yield juju
@@ -122,7 +130,7 @@ def juju(request: pytest.FixtureRequest) -> Iterator[jubilant.Juju]:
 
 @pytest.fixture(scope="module")
 def base(request: pytest.FixtureRequest) -> str:
-    """Get the base to deploy the Slurm charms on."""
+    """Get the base to deploy the filesystem-charms charms on."""
     return request.config.getoption("--charm-base")
 
 
@@ -202,6 +210,27 @@ def lustre_server_proxy(request: pytest.FixtureRequest) -> Path | str:
         LOCAL_LUSTRE_SERVER_PROXY,
     )
     return LOCAL_LUSTRE_SERVER_PROXY
+
+
+@pytest.fixture(scope="module")
+def lustre_server(request: pytest.FixtureRequest) -> Path | str:
+    """Get lustre-server charm to use for integration tests.
+
+    If the `LOCAL_LUSTRE_SERVER` environment variable is not set,
+    this will pull the charm from Charmhub instead.
+
+    Returns:
+        `Path` if "lustre-server" is built locally. `str` otherwise.
+    """
+    if not LOCAL_LUSTRE_SERVER:
+        logger.info("pulling `lustre-server` charm from charmhub")
+        return "lustre-server"
+
+    logger.info(
+        "using local `lustre-server` charm located at %s",
+        LOCAL_LUSTRE_SERVER,
+    )
+    return LOCAL_LUSTRE_SERVER
 
 
 @pytest.fixture(scope="module")

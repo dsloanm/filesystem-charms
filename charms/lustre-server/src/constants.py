@@ -1,7 +1,23 @@
+#!/usr/bin/env python3
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
 """Constants used within the charm."""
 
 from pathlib import Path
 
+FILESYSTEM_RELATION = "filesystem"
+FILESYSTEM_PEER_RELATION = "filesystem-peer"
+
+LUSTRE_FSNAME = "lustrefs"
+LUSTRE_LNET_CONF = Path("/etc/lnet.conf")
+LUSTRE_MGS_MDT_DATASET_PREFIX = "mgsmdt"
+LUSTRE_MGS_MDT_MOUNTPOINT = Path("/mnt/mgs_mdt")
+LUSTRE_OST_DATASET_PREFIX = "ost"
+LUSTRE_OST_PARENT_DIRECTORY = "/mnt"
+
+# zfsutils-linux is needed but is not an explicit dependency of the Lustre debs.
+LUSTRE_PACKAGES = ["lustre-server-modules-dkms", "lustre-server-utils", "zfsutils-linux"]
 LUSTRE_REPOSITORY_KEY = """-----BEGIN PGP PUBLIC KEY BLOCK-----
 Comment: Hostname:
 Version: Hockeypuck 2.2
@@ -34,13 +50,12 @@ fy6i2AnB3kUI27D4HY2YSlXLSRbjiSxTfVwNCzDsIh7Czefsm6ITK2+cVWs0hNQ=
 -----END PGP PUBLIC KEY BLOCK-----
 """
 LUSTRE_REPOSITORY_URI = "https://ppa.launchpadcontent.net/ubuntu-hpc/lustre-2.17/ubuntu/"
-LUSTRE_LNET_CONF = Path("/etc/lnet.conf")
-
-BASE_PACKAGES = ("ceph-common", "nfs-common", "autofs")
-LUSTRE_PACKAGES = (
-    "lustre-client-utils",
-    "lustre-client-modules-dkms",
-)
 
 IP_EXECUTABLE = "/usr/sbin/ip"
+LCTL_EXECUTABLE = "/usr/sbin/lctl"
 LNETCTL_EXECUTABLE = "/usr/sbin/lnetctl"
+MKFS_LUSTRE_EXECUTABLE = "/usr/sbin/mkfs.lustre"
+MOUNT_EXECUTABLE = "/usr/bin/mount"
+TRUNCATE_EXECUTABLE = "/usr/bin/truncate"
+ZFS_EXECUTABLE = "/usr/sbin/zfs"
+ZPOOL_EXECUTABLE = "/usr/sbin/zpool"

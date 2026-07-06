@@ -27,6 +27,8 @@ from charms.filesystem_client.v0.filesystem_info import (
 
 from utils.constants import (
     BASE_PACKAGES,
+    IP_EXECUTABLE,
+    LNETCTL_EXECUTABLE,
     LUSTRE_LNET_CONF,
     LUSTRE_PACKAGES,
     LUSTRE_REPOSITORY_KEY,
@@ -206,29 +208,9 @@ class MountsManager:
             return
 
         # Enable LNet on default network interface if not already enabled.
-        interface = _get_default_interface()
         # TODO: Add InfiniBand support. MVP is scoped to TCP for now.
-        try:
-            result = subprocess.run(["lnetctl", "net", "show", "--net", "tcp"])
-            if result.returncode != 0:
-                # Command failed to get the tcp network. Need to create it.
-                subprocess.run(
-                    ["lnetctl", "net", "add", "--net", "tcp", "--if", interface], check=True
-                )
-
-            # TODO: might want to check if the tcp network is assigned to the
-            # correct interface?
-        except subprocess.CalledProcessError as e:
-            _logger.error("failed to setup lnet on the system", exc_info=e)
-            raise Error(str(e))
-
-        try:
-            # Persist changes.
-            result = subprocess.check_output(["lnetctl", "export", "--backup"], text=True)
-            LUSTRE_LNET_CONF.write_text(result)
-        except (subprocess.CalledProcessError, IOError) as e:
-            _logger.error("failed to write lnet configuration to the system", exc_info=e)
-            raise Error(str(e))
+        _ensure_lnet_tcp(_get_default_interface())
+        _persist_lnet_config()
 
     def supported(self) -> bool:
         """Check if underlying base supports mounting shares."""
@@ -313,15 +295,76 @@ def _get_endpoint_and_opts(info: FilesystemInfo, enable_lustre: bool) -> tuple[s
     return endpoint, options
 
 
-def _get_default_interface():
-    """Return the default network interface name for this unit."""
+def _ensure_lnet_tcp(interface: str) -> None:
+    """Ensure an LNet TCP network exists on the given interface. Idempotent.
+
+    Args:
+        interface: Name of the network interface.
+
+    Raises:
+        Error: If configuring the LNet TCP network fails.
+    """
     try:
-        result = subprocess.check_output(["ip", "-json", "route", "show", "default"], text=True)
-        routes = json.loads(result)
-        return routes[0]["dev"]
-    except (json.JSONDecodeError, TypeError, subprocess.CalledProcessError) as e:
+        result = subprocess.run([LNETCTL_EXECUTABLE, "net", "show", "--net", "tcp"])
+        if result.returncode != 0:
+            subprocess.run(
+                [LNETCTL_EXECUTABLE, "net", "add", "--net", "tcp", "--if", interface], check=True
+            )
+        # TODO: verify the tcp network is assigned to the correct interface?
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        _logger.error("failed to setup lnet on the system", exc_info=e)
+        raise Error(str(e))
+
+
+def _get_default_interface() -> str:
+    """Return the default network interface name for this unit.
+
+    Returns:
+        The name of the default network interface.
+
+    Raises:
+        Error: If querying or parsing the default network interface fails.
+    """
+    try:
+        result = subprocess.run(
+            [IP_EXECUTABLE, "-json", "route", "show", "default"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
         _logger.error("failed to get the default network interface", exc_info=e)
         raise Error(str(e))
-    except (KeyError, IndexError) as e:
+
+    try:
+        routes = json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        _logger.error("failed to parse default route data", exc_info=e)
+        raise Error(str(e))
+
+    try:
+        return routes[0]["dev"]
+    except (IndexError, KeyError) as e:
         _logger.error("could not determine the default network interface name", exc_info=e)
+        raise Error(str(e))
+
+
+def _persist_lnet_config() -> None:
+    """Export and persist the current LNet configuration.
+
+    Raises:
+        Error: If exporting or writing the LNet configuration fails.
+    """
+    try:
+        result = subprocess.check_output([LNETCTL_EXECUTABLE, "export", "--backup"], text=True)
+
+        # Write to temp file then atomically replace existing config. Avoids leaving partial config
+        # file if write process is interrupted.
+        tmp = LUSTRE_LNET_CONF.with_name(f".{LUSTRE_LNET_CONF.name}.tmp")
+        tmp.unlink(missing_ok=True)  # Clean up any failed previous attempt.
+        tmp.touch(mode=0o600)
+        tmp.write_text(result)
+        tmp.replace(LUSTRE_LNET_CONF)
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError) as e:
+        _logger.error("failed to write lnet configuration to the system", exc_info=e)
         raise Error(str(e))
