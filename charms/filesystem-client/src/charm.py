@@ -51,6 +51,7 @@ class FilesystemClientCharm(ops.CharmBase):
         self._mount.set_mount_status(mounted=False)
         self.unit.status = ops.MaintenanceStatus("Updating status")
         self._mounts_manager.enable_lustre = cast(bool, self.config.get("enable-lustre"))
+        self._mounts_manager.lnet_networks_spec = cast(str, self.config.get("lnet-networks"))
 
         try:
             if not self._mounts_manager.supported():
