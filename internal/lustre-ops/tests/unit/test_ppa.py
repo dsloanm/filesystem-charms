@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from charmlibs import apt
 from lustre_ops import ppa
-from lustre_ops.errors import RepositoryError
+from lustre_ops.errors import RepositoryCodenameError, RepositoryGPGKeyError, RepositorySyncError
 from pytest_mock import MockerFixture
 
 
@@ -40,39 +40,35 @@ class TestSetupLustreRepository:
     def test_missing_version_codename(
         self, mocker: MockerFixture, mock_os_release: MagicMock
     ) -> None:
-        """KeyError retrieving the OS codename raises RepositoryError."""
+        """Failure to retrieve the OS codename raises error."""
         mock_os_release.return_value = {}
         mocker.patch("lustre_ops.ppa.apt.DebianRepository")
 
-        with pytest.raises(RepositoryError) as excinfo:
+        with pytest.raises(RepositoryCodenameError):
             ppa.setup_lustre_repository()
-        assert isinstance(excinfo.value.__cause__, KeyError)
 
     def test_gpg_key_error(self, mocker: MockerFixture, mock_os_release: MagicMock) -> None:
-        """GPG key import failure raises RepositoryError."""
+        """GPG key import failure raises error."""
         mock_repo = mocker.patch("lustre_ops.ppa.apt.DebianRepository").return_value
         mock_repo.import_key.side_effect = apt.GPGKeyError("bad key")
 
-        with pytest.raises(RepositoryError) as excinfo:
+        with pytest.raises(RepositoryGPGKeyError):
             ppa.setup_lustre_repository()
-        assert isinstance(excinfo.value.__cause__, apt.GPGKeyError)
 
     def test_repo_add_error(self, mocker: MockerFixture, mock_os_release: MagicMock) -> None:
-        """Repository add/update failure raises RepositoryError."""
+        """Repository add/update failure raises error."""
         mocker.patch("lustre_ops.ppa.apt.DebianRepository")
         mock_mapping = mocker.patch("lustre_ops.ppa.apt.RepositoryMapping").return_value
         mock_mapping.add.side_effect = CalledProcessError(1, "apt")
 
-        with pytest.raises(RepositoryError) as excinfo:
+        with pytest.raises(RepositorySyncError):
             ppa.setup_lustre_repository()
-        assert isinstance(excinfo.value.__cause__, CalledProcessError)
 
     def test_update_error(self, mocker: MockerFixture, mock_os_release: MagicMock) -> None:
-        """apt.update() failure raises RepositoryError."""
+        """apt.update() failure raises error."""
         mocker.patch("lustre_ops.ppa.apt.DebianRepository")
         mocker.patch("lustre_ops.ppa.apt.RepositoryMapping")
         mocker.patch("lustre_ops.ppa.apt.update", side_effect=CalledProcessError(1, "apt update"))
 
-        with pytest.raises(RepositoryError) as excinfo:
+        with pytest.raises(RepositorySyncError):
             ppa.setup_lustre_repository()
-        assert isinstance(excinfo.value.__cause__, CalledProcessError)

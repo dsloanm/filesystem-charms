@@ -12,7 +12,15 @@ import pytest
 import yaml
 from lustre_ops import lnet
 from lustre_ops.constants import LCTL_EXECUTABLE, LNETCTL_EXECUTABLE
-from lustre_ops.errors import LNetError
+from lustre_ops.errors import (
+    LNetAddInterfaceError,
+    LNetAddNetworkError,
+    LNetAutodetectError,
+    LNetConfigExportError,
+    LNetParseError,
+    LNetQueryError,
+    LNetRemoveInterfaceError,
+)
 from pytest_mock import MockerFixture
 
 
@@ -99,10 +107,10 @@ class TestInit:
         mock_persist: MagicMock,
         mock_detect: MagicMock,
     ) -> None:
-        """init(networks=None) raises LNetError when auto-detection finds no networks."""
+        """init(networks=None) raises error when auto-detection finds no networks."""
         mock_detect.return_value = {}
 
-        with pytest.raises(LNetError):
+        with pytest.raises(LNetAutodetectError):
             lnet.init(networks=None)
 
 
@@ -196,7 +204,7 @@ class TestEnsureNetworks:
         ]
 
     def test_add_interface_failure_raises(self, mock_run: MagicMock) -> None:
-        """A failure on interface add raises LNetError."""
+        """A failure on interface add raises error."""
         mock_run.return_value.stdout = _net_show_output({"o2ib": ["ib0"]})
         mock_run.side_effect = [
             mock_run.return_value,
@@ -204,11 +212,11 @@ class TestEnsureNetworks:
         ]
         nets = {"o2ib": ["ib0", "ib1"]}
 
-        with pytest.raises(LNetError):
+        with pytest.raises(LNetAddInterfaceError):
             lnet._ensure_networks(nets)
 
     def test_remove_interface_failure_raises(self, mock_run: MagicMock) -> None:
-        """A failure on interface removal raises LNetError."""
+        """A failure on interface removal raises error."""
         mock_run.return_value.stdout = _net_show_output({"tcp": ["eth0", "eth1"]})
         mock_run.side_effect = [
             mock_run.return_value,
@@ -216,18 +224,18 @@ class TestEnsureNetworks:
         ]
         nets = {"tcp": ["eth0"]}  # eth1 is stale and should be removed
 
-        with pytest.raises(LNetError):
+        with pytest.raises(LNetRemoveInterfaceError):
             lnet._ensure_networks(nets)
 
     def test_net_add_failure_raises(self, mock_run: MagicMock) -> None:
-        """A failure adding a missing network raises LNetError."""
+        """A failure adding a missing network raises error."""
         mock_run.side_effect = [
             mock_run.return_value,
             subprocess.CalledProcessError(1, LNETCTL_EXECUTABLE),
         ]
         nets = {"tcp": ["eth0"]}
 
-        with pytest.raises(LNetError):
+        with pytest.raises(LNetAddNetworkError):
             lnet._ensure_networks(nets)
 
     def test_multiple_networks(self, mock_run: MagicMock) -> None:
@@ -282,24 +290,22 @@ class TestEnsureNetworks:
         ]
 
     def test_lnetctl_not_found_on_show(self, mock_run: MagicMock) -> None:
-        """FileNotFoundError on net show raises LNetError."""
+        """FileNotFoundError on net show raises error."""
         mock_run.side_effect = FileNotFoundError(1, "/bad/path/to/lnetctl")
         nets = {"tcp": ["eth0"]}
 
-        with pytest.raises(LNetError) as excinfo:
+        with pytest.raises(LNetQueryError):
             lnet._ensure_networks(nets)
-        assert isinstance(excinfo.value.__cause__, FileNotFoundError)
 
     def test_net_show_failure_raises(self, mock_run: MagicMock) -> None:
-        """A non-zero exit from net show raises LNetError."""
+        """A non-zero exit from net show raises error."""
         mock_run.side_effect = subprocess.CalledProcessError(
             1, LNETCTL_EXECUTABLE, stderr="error running lnetctl net show"
         )
         nets = {"tcp": ["eth0"]}
 
-        with pytest.raises(LNetError) as excinfo:
+        with pytest.raises(LNetQueryError):
             lnet._ensure_networks(nets)
-        assert isinstance(excinfo.value.__cause__, subprocess.CalledProcessError)
 
 
 class TestParseNetworkConfig:
@@ -348,8 +354,8 @@ class TestParseNetworkConfig:
         ],
     )
     def test_invalid_raises(self, spec: str, match: str) -> None:
-        """A malformed specification raises LNetError with a descriptive message."""
-        with pytest.raises(LNetError, match=match):
+        """A malformed specification raises error with a descriptive message."""
+        with pytest.raises(LNetParseError, match=match):
             lnet.parse_network_config(spec)
 
     def test_trailing_zero_equivalent_to_bare_name(self) -> None:
@@ -378,9 +384,9 @@ class TestParseNetworks:
         assert lnet._parse_networks(output) == {"tcp": []}
 
     def test_no_local_nis_raises(self) -> None:
-        """A network with no 'local NI(s)' raises LNetError."""
+        """A network with no 'local NI(s)' raises error."""
         output = "net:\n-    net type: tcp\n"
-        with pytest.raises(LNetError, match="Failed to validate LNet network output"):
+        with pytest.raises(LNetParseError, match="Failed to validate LNet network output"):
             lnet._parse_networks(output)
 
     def test_multi_ni_multi_rail(self) -> None:
@@ -396,8 +402,8 @@ class TestParseNetworks:
         ) == {"o2ib": ["enp6s0"], "o2ib1": ["enp5s0"]}
 
     def test_empty_output_raises(self) -> None:
-        """Empty stdout raises LNetError."""
-        with pytest.raises(LNetError, match="Empty LNet network output"):
+        """Empty stdout raises error."""
+        with pytest.raises(LNetParseError, match="Empty LNet network output"):
             lnet._parse_networks("")
 
     def test_no_nets_returns_empty(self) -> None:
@@ -405,8 +411,8 @@ class TestParseNetworks:
         assert lnet._parse_networks("net:\n") == {}
 
     def test_malformed_yaml_raises(self) -> None:
-        """Malformed YAML raises LNetError."""
-        with pytest.raises(LNetError, match="Failed to parse LNet network output"):
+        """Malformed YAML raises error."""
+        with pytest.raises(LNetParseError, match="Failed to parse LNet network output"):
             lnet._parse_networks("net:\n    - [unclosed")
 
 
@@ -435,29 +441,24 @@ class TestGetNids:
         )
 
     @pytest.mark.parametrize(
-        ("side_effect", "expected_cause"),
+        ("side_effect"),
         [
             pytest.param(
                 subprocess.CalledProcessError(1, LCTL_EXECUTABLE),
-                subprocess.CalledProcessError,
                 id="run_error",
             ),
             pytest.param(
                 FileNotFoundError(1, "/bad/path/to/lctl"),
-                FileNotFoundError,
                 id="not_found",
             ),
         ],
     )
-    def test_error_wrapped_as_lnet_error(
-        self, mock_run: MagicMock, side_effect: Exception, expected_cause: type
-    ) -> None:
-        """Errors from lctl are wrapped in LNetError with the original cause chained."""
+    def test_nid_errors(self, mock_run: MagicMock, side_effect: Exception) -> None:
+        """Errors from lctl are raised."""
         mock_run.side_effect = side_effect
 
-        with pytest.raises(LNetError) as excinfo:
+        with pytest.raises(LNetQueryError):
             lnet.get_nids()
-        assert isinstance(excinfo.value.__cause__, expected_cause)
 
 
 class TestPersistLnetConfig:
@@ -480,6 +481,5 @@ class TestPersistLnetConfig:
         """Lnetctl export failure."""
         mock_run.side_effect = subprocess.CalledProcessError(1, LNETCTL_EXECUTABLE)
 
-        with pytest.raises(LNetError) as excinfo:
+        with pytest.raises(LNetConfigExportError):
             lnet._persist_lnet_config()
-        assert isinstance(excinfo.value.__cause__, subprocess.CalledProcessError)

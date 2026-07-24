@@ -18,7 +18,15 @@ from lustre_ops.constants import (
     LNETCTL_EXECUTABLE,
     LUSTRE_LNET_CONF,
 )
-from lustre_ops.errors import LNetError
+from lustre_ops.errors import (
+    LNetAddInterfaceError,
+    LNetAddNetworkError,
+    LNetAutodetectError,
+    LNetConfigExportError,
+    LNetParseError,
+    LNetQueryError,
+    LNetRemoveInterfaceError,
+)
 from lustre_ops.lnet_detection import detect_networks
 
 _logger = logging.getLogger(__name__)
@@ -58,14 +66,14 @@ def init(networks: dict[str, list[str]] | None = None) -> None:
         If ``None``, networks are auto-detected.
 
     Raises:
-        LNetError: If any LNet operation fails or if auto-detection finds no usable network
-        interfaces.
+        LNetAutodetectError: If auto-detection finds no usable network interfaces.
+        LNetError: If any other LNet operation fails.
     """
     if networks is None:
         networks = detect_networks()
         _logger.info("LNet networks determined by auto-detection: %s", networks)
         if not networks:
-            raise LNetError("Auto-detection found no usable network interfaces")
+            raise LNetAutodetectError("Auto-detection found no usable network interfaces")
 
     _ensure_networks(networks)
     _persist_lnet_config()
@@ -79,14 +87,14 @@ def get_nids() -> list[str]:
         Empty if no NIDs are configured.
 
     Raises:
-        LNetError: If querying the NIDs fails.
+        LNetQueryError: If querying the NIDs fails.
     """
     try:
         result = subprocess.run(
             [LCTL_EXECUTABLE, "list_nids"], capture_output=True, text=True, check=True
         )
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        raise LNetError("Failed to query Lustre NIDs") from e
+        raise LNetQueryError("Failed to query Lustre NIDs") from e
 
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
@@ -113,7 +121,7 @@ def parse_network_config(spec: str) -> dict[str, list[str]] | None:
         is provided.
 
     Raises:
-        LNetError: If the specification is malformed.
+        LNetParseError: If the specification is malformed.
     """
     spec = spec.strip()
     if not spec:
@@ -125,12 +133,12 @@ def parse_network_config(spec: str) -> dict[str, list[str]] | None:
         if not token:
             continue
         if "=" not in token:
-            raise LNetError(f"Invalid LNet network specification `{token}`")
+            raise LNetParseError(f"Invalid LNet network specification `{token}`")
 
         name, interfaces_str = token.split("=", 1)
         name = name.strip()
         if not name:
-            raise LNetError(f"Empty network name in `{token}`")
+            raise LNetParseError(f"Empty network name in `{token}`")
 
         # Special case of index 0 network must be handled.
         # LNet indexes from 0 but does not require the trailing 0 for the first net.
@@ -148,10 +156,10 @@ def parse_network_config(spec: str) -> dict[str, list[str]] | None:
 
         interfaces = [s.strip() for s in interfaces_str.split(",") if s.strip()]
         if not interfaces:
-            raise LNetError(f"No interfaces specified for network `{token}`")
+            raise LNetParseError(f"No interfaces specified for network `{token}`")
 
         if name in networks:
-            raise LNetError(f"Duplicate LNet network `{name}`")
+            raise LNetParseError(f"Duplicate LNet network `{name}`")
         networks[name] = interfaces
 
     return networks
@@ -165,7 +173,7 @@ def _add_interfaces(net: str, interfaces: set[str]) -> None:
         interfaces: The interfaces to add.
 
     Raises:
-        LNetError: If adding interfaces fails.
+        LNetAddInterfaceError: If adding interfaces fails.
     """
     cmd = [LNETCTL_EXECUTABLE, "interface", "add", "--net", net]
     for iface in sorted(interfaces):  # sort to ensure deterministic interface order
@@ -174,7 +182,9 @@ def _add_interfaces(net: str, interfaces: set[str]) -> None:
     try:
         subprocess.run(cmd, check=True)
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        raise LNetError(f"Failed to add interfaces {interfaces} to LNet network {net}") from e
+        raise LNetAddInterfaceError(
+            f"Failed to add interfaces {interfaces} to LNet network {net}"
+        ) from e
 
 
 def _add_network(name: str, interfaces: list[str]) -> None:
@@ -185,7 +195,7 @@ def _add_network(name: str, interfaces: list[str]) -> None:
         interfaces: The interfaces to bind to this network.
 
     Raises:
-        LNetError: If adding the network fails.
+        LNetAddNetworkError: If adding the network fails.
     """
     cmd = [LNETCTL_EXECUTABLE, "net", "add", "--net", name]
     for iface in interfaces:
@@ -193,7 +203,7 @@ def _add_network(name: str, interfaces: list[str]) -> None:
     try:
         subprocess.run(cmd, check=True)
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        raise LNetError(f"Failed to add LNet network {name}") from e
+        raise LNetAddNetworkError(f"Failed to add LNet network {name}") from e
 
 
 def _ensure_networks(networks: dict[str, list[str]]) -> None:
@@ -208,7 +218,10 @@ def _ensure_networks(networks: dict[str, list[str]]) -> None:
         ``{"tcp": ["eth0"], "o2ib": ["ib0", "ib1"]}``.
 
     Raises:
-        LNetError: If any LNet operation fails.
+        LNetAddNetworkError: If adding a network fails.
+        LNetAddInterfaceError: If adding interfaces fails.
+        LNetQueryError: If querying the existing LNet networks fails.
+        LNetRemoveInterfaceError: If removing interfaces fails.
     """
     try:
         result = subprocess.run(
@@ -218,7 +231,7 @@ def _ensure_networks(networks: dict[str, list[str]]) -> None:
             check=True,
         )
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        raise LNetError("Failed to query LNet networks") from e
+        raise LNetQueryError("Failed to query LNet networks") from e
 
     # TODO: Address potential TOCTOU race. State of LNet networks may change between above query and
     # the add/remove operations below. This will only occur if the networks are being modified by
@@ -251,7 +264,7 @@ def _persist_lnet_config() -> None:
     """Export the current LNet configuration to the disk.
 
     Raises:
-        LNetError: If persisting the LNet configuration fails.
+        LNetConfigExportError: If persisting the LNet configuration fails.
     """
     try:
         result = subprocess.run(
@@ -266,7 +279,7 @@ def _persist_lnet_config() -> None:
         tmp.write_text(result)
         tmp.replace(LUSTRE_LNET_CONF)
     except (subprocess.CalledProcessError, FileNotFoundError, OSError) as e:
-        raise LNetError("Failed to write LNet configuration data") from e
+        raise LNetConfigExportError("Failed to write LNet configuration data") from e
 
 
 def _parse_networks(show_output: str) -> dict[str, list[str]]:
@@ -279,7 +292,7 @@ def _parse_networks(show_output: str) -> dict[str, list[str]]:
         A mapping from LNet network name to its interfaces.
 
     Raises:
-        LNetError: If the given string cannot be parsed.
+        LNetParseError: If the given string cannot be parsed.
     """
     # Sample `lnetctl net show`:
     #
@@ -310,15 +323,15 @@ def _parse_networks(show_output: str) -> dict[str, list[str]]:
     try:
         data = yaml.safe_load(show_output)
     except yaml.YAMLError as e:
-        raise LNetError("Failed to parse LNet network output") from e
+        raise LNetParseError("Failed to parse LNet network output") from e
 
     if data is None:
-        raise LNetError("Empty LNet network output")
+        raise LNetParseError("Empty LNet network output")
 
     try:
         parsed = _NetShowOutput.model_validate(data)
     except ValidationError as e:
-        raise LNetError(f"Failed to validate LNet network output: {data}") from e
+        raise LNetParseError(f"Failed to validate LNet network output: {data}") from e
 
     if not parsed.net:
         # TODO: Confirm if this should be an error. Empty "net" indicates no networks configured,
@@ -344,7 +357,7 @@ def _remove_interfaces(net: str, interfaces: set[str]) -> None:
         interfaces: The interfaces to remove.
 
     Raises:
-        LNetError: If removing the interfaces fails.
+        LNetRemoveInterfaceError: If removing the interfaces fails.
     """
     cmd = [LNETCTL_EXECUTABLE, "interface", "del", "--net", net]
     for iface in interfaces:
@@ -353,4 +366,6 @@ def _remove_interfaces(net: str, interfaces: set[str]) -> None:
     try:
         subprocess.run(cmd, check=True)
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        raise LNetError(f"Failed to remove interfaces {interfaces} from LNet network {net}") from e
+        raise LNetRemoveInterfaceError(
+            f"Failed to remove interfaces {interfaces} from LNet network {net}"
+        ) from e

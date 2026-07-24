@@ -8,7 +8,7 @@ import logging
 import subprocess
 
 from lustre_ops.constants import IP_EXECUTABLE, RDMA_EXECUTABLE, SYS_CLASS_NET
-from lustre_ops.errors import LNetError
+from lustre_ops.errors import LNetParseError, LNetQueryError
 
 _logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ def detect_networks() -> dict[str, list[str]]:
         present.
 
     Raises:
-        LNetError: If detection fails.
+        LNetAutodetectError: If detection fails.
     """
     networks: dict[str, list[str]] = {}
 
@@ -46,7 +46,8 @@ def _default_route_interface() -> str | None:
     """Return the default-route interface name, or ``None`` if there is none.
 
     Raises:
-        LNetError: If querying or parsing the default route fails.
+        LNetQueryError: If querying the default route fails.
+        LNetParseError: If parsing the default route data fails.
     """
     try:
         result = subprocess.run(
@@ -56,19 +57,19 @@ def _default_route_interface() -> str | None:
             check=True,
         )
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        raise LNetError("Failed to query default network interface") from e
+        raise LNetQueryError("Failed to query default network interface") from e
 
     try:
         routes = json.loads(result.stdout)
     except json.JSONDecodeError as e:
-        raise LNetError("Failed to parse default route data") from e
+        raise LNetParseError("Failed to parse default route data") from e
 
     if not routes:
         return None
     try:
         return routes[0]["dev"]
     except KeyError as e:
-        raise LNetError("Failed to extract default network interface from route data") from e
+        raise LNetParseError("Failed to extract default network interface from route data") from e
 
 
 def _ipoib_netdev_map() -> dict[str, str]:
@@ -107,7 +108,8 @@ def _rdma_interfaces() -> list[str]:
         a physical link up. Empty if no RDMA devices are present or none are active.
 
     Raises:
-        LNetError: If detection fails.
+        LNetQueryError: If querying RDMA links fails.
+        LNetParseError: If parsing RDMA link data fails.
     """
     try:
         result = subprocess.run(
@@ -117,14 +119,14 @@ def _rdma_interfaces() -> list[str]:
             check=True,
         )
     except FileNotFoundError as e:
-        raise LNetError(f"Failed to query RDMA links: {RDMA_EXECUTABLE} not found") from e
+        raise LNetQueryError(f"Failed to query RDMA links: {RDMA_EXECUTABLE} not found") from e
     except subprocess.CalledProcessError as e:
-        raise LNetError("Failed to query RDMA links") from e
+        raise LNetQueryError("Failed to query RDMA links") from e
 
     try:
         links = json.loads(result.stdout)
     except json.JSONDecodeError as e:
-        raise LNetError("Failed to parse RDMA link data") from e
+        raise LNetParseError("Failed to parse RDMA link data") from e
 
     # Map of RDMA device (e.g. mlx5_0) to IPoIB netdev (e.g. ib0) is necessary as the `rdma` command
     # does not give the netdev for IPoIB devices. LNet requires netdev name for o2ib networks (RDMA

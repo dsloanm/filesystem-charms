@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from lustre_ops import lnet_detection
-from lustre_ops.errors import LNetError
+from lustre_ops.errors import LNetParseError, LNetQueryError
 from pytest_mock import MockerFixture
 
 
@@ -68,25 +68,22 @@ class TestDefaultRouteInterface:
         """Ip command fails."""
         mock_run.side_effect = subprocess.CalledProcessError(1, "ip")
 
-        with pytest.raises(LNetError) as excinfo:
+        with pytest.raises(LNetQueryError):
             lnet_detection._default_route_interface()
-        assert isinstance(excinfo.value.__cause__, subprocess.CalledProcessError)
 
     def test_bad_json(self, mock_run: MagicMock) -> None:
         """Ip command returns invalid JSON."""
         mock_run.return_value.stdout = "not json"
 
-        with pytest.raises(LNetError) as excinfo:
+        with pytest.raises(LNetParseError):
             lnet_detection._default_route_interface()
-        assert isinstance(excinfo.value.__cause__, json.JSONDecodeError)
 
     def test_missing_dev_key(self, mock_run: MagicMock) -> None:
         """Ip command returns JSON without 'dev' key."""
         mock_run.return_value.stdout = json.dumps([{"not_dev": "eth0"}])
 
-        with pytest.raises(LNetError) as excinfo:
+        with pytest.raises(LNetParseError):
             lnet_detection._default_route_interface()
-        assert isinstance(excinfo.value.__cause__, KeyError)
 
 
 class TestRdmaInterfaces:
@@ -194,28 +191,25 @@ class TestRdmaInterfaces:
         assert lnet_detection._rdma_interfaces() == []
 
     def test_rdma_not_found(self, mock_run: MagicMock) -> None:
-        """FileNotFoundError (rdma not installed) raises LNetError."""
+        """FileNotFoundError (rdma not installed) raises error."""
         mock_run.side_effect = FileNotFoundError(1, "/bad/path/to/rdma")
 
-        with pytest.raises(LNetError) as excinfo:
+        with pytest.raises(LNetQueryError):
             lnet_detection._rdma_interfaces()
-        assert isinstance(excinfo.value.__cause__, FileNotFoundError)
 
     def test_rdma_command_fails(self, mock_run: MagicMock) -> None:
-        """A non-zero exit from rdma raises LNetError."""
+        """A non-zero exit from rdma raises error."""
         mock_run.side_effect = subprocess.CalledProcessError(1, "rdma error")
 
-        with pytest.raises(LNetError) as excinfo:
+        with pytest.raises(LNetQueryError):
             lnet_detection._rdma_interfaces()
-        assert isinstance(excinfo.value.__cause__, subprocess.CalledProcessError)
 
     def test_bad_json(self, mock_run: MagicMock) -> None:
-        """Invalid JSON output raises LNetError."""
+        """Invalid JSON output raises error."""
         mock_run.return_value.stdout = "not json"
 
-        with pytest.raises(LNetError) as excinfo:
+        with pytest.raises(LNetParseError):
             lnet_detection._rdma_interfaces()
-        assert isinstance(excinfo.value.__cause__, json.JSONDecodeError)
 
 
 class TestIpoibNetdevMap:
