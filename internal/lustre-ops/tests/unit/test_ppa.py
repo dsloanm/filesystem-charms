@@ -19,7 +19,7 @@ def mock_os_release(mocker: MockerFixture) -> MagicMock:
     return mocker.patch.object(
         ppa.platform,
         "freedesktop_os_release",
-        return_value={"VERSION_CODENAME": "noble"},
+        return_value={"VERSION_CODENAME": "resolute"},
     )
 
 
