@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 refresh_check_lustre = refresh(hook=check_lustre)
 
 
-class CharmStatuses(StrEnum):
+class _CharmStatus(StrEnum):
     """Charm status messages."""
 
     REPO_SETUP = "Setting up package repository"
@@ -74,43 +74,43 @@ class LustreCharm(ops.CharmBase):
     def _on_install(self, _: ops.InstallEvent):
         """Install Lustre packages."""
         # Lustre packages are not in the Ubuntu archive. Add an external repository.
-        self.unit.status = ops.MaintenanceStatus(CharmStatuses.REPO_SETUP)
+        self.unit.status = ops.MaintenanceStatus(_CharmStatus.REPO_SETUP)
         try:
             ppa.setup_lustre_repository()
         except RepositoryError as e:
             logger.exception("failed to set up Lustre package repository: %s", e)
-            self.unit.status = ops.BlockedStatus(CharmStatuses.FAILED_REPO_SETUP)
+            self.unit.status = ops.BlockedStatus(_CharmStatus.FAILED_REPO_SETUP)
             return
 
-        self.unit.status = ops.MaintenanceStatus(CharmStatuses.PACKAGE_INSTALL)
+        self.unit.status = ops.MaintenanceStatus(_CharmStatus.PACKAGE_INSTALL)
         try:
             apt.add_package(LUSTRE_PACKAGES)
         except (apt.PackageNotFoundError, apt.PackageError) as e:
             logger.exception("failed to install packages: %s. reason: %s", LUSTRE_PACKAGES, e)
-            self.unit.status = ops.BlockedStatus(CharmStatuses.failed_install(LUSTRE_PACKAGES))
+            self.unit.status = ops.BlockedStatus(_CharmStatus.failed_install(LUSTRE_PACKAGES))
             return
 
-        self.unit.status = ops.MaintenanceStatus(CharmStatuses.LNET_INIT)
+        self.unit.status = ops.MaintenanceStatus(_CharmStatus.LNET_INIT)
         try:
             networks = lnet.parse_network_config(self.typed_config.lnet_networks)
             lnet.init(networks=networks)
         except LNetError as e:
             logger.exception("failed to initialize LNet: %s", e)
-            self.unit.status = ops.BlockedStatus(CharmStatuses.FAILED_LNET_INIT)
+            self.unit.status = ops.BlockedStatus(_CharmStatus.FAILED_LNET_INIT)
             return
 
-        self.unit.status = ops.MaintenanceStatus(CharmStatuses.PREPARING_SERVICES)
+        self.unit.status = ops.MaintenanceStatus(_CharmStatus.PREPARING_SERVICES)
 
     @refresh_check_lustre
     def _on_start(self, _: ops.StartEvent):
         """Set up Lustre services."""
-        self.unit.status = ops.MaintenanceStatus(CharmStatuses.STARTING_SERVICES)
+        self.unit.status = ops.MaintenanceStatus(_CharmStatus.STARTING_SERVICES)
 
         try:
             data = self.peers.get_app_data()
         except LustrePeerError as e:
             logger.exception("failed to read peer relation data: %s", e)
-            raise StopCharm(ops.BlockedStatus(CharmStatuses.FAILED_PEER_DATA))
+            raise StopCharm(ops.BlockedStatus(_CharmStatus.FAILED_PEER_DATA))
 
         mgs_unit = data.mgs_unit_name
         mgs_nids = data.mgs_nids
@@ -124,7 +124,7 @@ class LustreCharm(ops.CharmBase):
                     self.peers.mgs_nids_published()
                 except (LustrePeerError, LustreFilesystemError) as e:
                     logger.exception("failed to set up MGS+MDS: %s", e)
-                    raise StopCharm(ops.BlockedStatus(CharmStatuses.FAILED_MGS_MDS_SETUP))
+                    raise StopCharm(ops.BlockedStatus(_CharmStatus.FAILED_MGS_MDS_SETUP))
 
             # Initial non-leaders are OSSes and must wait for leader to publish MGS info in the peer
             # relation before starting.
@@ -140,7 +140,7 @@ class LustreCharm(ops.CharmBase):
                 lustre_fs.oss_setup(LUSTRE_FSNAME, self.model.unit.name, mgs_nids)
         except LustreFilesystemError as e:
             logger.exception("failed to set up Lustre services: %s", e)
-            raise StopCharm(ops.BlockedStatus(CharmStatuses.FAILED_SERVICE_SETUP))
+            raise StopCharm(ops.BlockedStatus(_CharmStatus.FAILED_SERVICE_SETUP))
 
     @refresh_check_lustre
     def _on_update_status(self, _: ops.UpdateStatusEvent) -> None:

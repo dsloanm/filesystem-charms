@@ -27,8 +27,8 @@ _logger = logging.getLogger(__name__)
 PEER_RELATION = "lustre-peer"
 
 
-class CharmStatuses(StrEnum):
-    """Charm status messages."""
+class _LustrePeerStatus(StrEnum):
+    """Charm status messages for the Lustre peer observer."""
 
     FAILED_OSS_SETUP = "Failed to set up OSS"
     FAILED_PUBLISH_FILESYSTEM_INFO = "Failed to publish filesystem info to peer relation"
@@ -182,14 +182,14 @@ class LustrePeerObserver(ops.Object):
                 lustre_fs.oss_setup(LUSTRE_FSNAME, self.model.unit.name, data.mgs_nids)
             except LustreFilesystemError as e:
                 _logger.exception("failed to set up OSS: %s", e)
-                self.model.unit.status = ops.BlockedStatus(CharmStatuses.FAILED_OSS_SETUP)
+                self.model.unit.status = ops.BlockedStatus(_LustrePeerStatus.FAILED_OSS_SETUP)
                 return
 
         try:
             self._set_unit_ready()
         except LustrePeerError as e:
             _logger.exception("failed to set unit ready: %s", e)
-            self.model.unit.status = ops.BlockedStatus(CharmStatuses.FAILED_SET_UNIT_READY)
+            self.model.unit.status = ops.BlockedStatus(_LustrePeerStatus.FAILED_SET_UNIT_READY)
             return
 
         if self.model.unit.is_leader():
@@ -211,7 +211,7 @@ class LustrePeerObserver(ops.Object):
             except LustrePeerError as e:
                 _logger.exception("failed to publish filesystem info: %s", e)
                 self.model.unit.status = ops.BlockedStatus(
-                    CharmStatuses.FAILED_PUBLISH_FILESYSTEM_INFO
+                    _LustrePeerStatus.FAILED_PUBLISH_FILESYSTEM_INFO
                 )
                 return
 

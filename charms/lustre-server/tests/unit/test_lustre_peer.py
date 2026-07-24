@@ -209,7 +209,9 @@ class TestOnRelationChanged:
         observer = lustre_peer.LustrePeerObserver(mocker.MagicMock())
         observer._on_relation_changed(mocker.MagicMock())
 
-        assert model.unit.status == ops.BlockedStatus(lustre_peer.CharmStatuses.FAILED_OSS_SETUP)
+        assert model.unit.status == ops.BlockedStatus(
+            lustre_peer._LustrePeerStatus.FAILED_OSS_SETUP
+        )
 
     def test_set_unit_ready_failure(
         self, mocker: MockerFixture, oss_unit: tuple[MagicMock, MagicMock]
@@ -225,7 +227,7 @@ class TestOnRelationChanged:
         observer._on_relation_changed(mocker.MagicMock())
 
         assert model.unit.status == ops.BlockedStatus(
-            lustre_peer.CharmStatuses.FAILED_SET_UNIT_READY
+            lustre_peer._LustrePeerStatus.FAILED_SET_UNIT_READY
         )
 
     def test_publish_filesystem_info_failure(
@@ -244,7 +246,7 @@ class TestOnRelationChanged:
         observer._on_relation_changed(mocker.MagicMock())
 
         assert model.unit.status == ops.BlockedStatus(
-            lustre_peer.CharmStatuses.FAILED_PUBLISH_FILESYSTEM_INFO
+            lustre_peer._LustrePeerStatus.FAILED_PUBLISH_FILESYSTEM_INFO
         )
 
 

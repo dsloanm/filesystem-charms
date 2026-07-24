@@ -53,7 +53,7 @@ class TestCharmInstall:
     ) -> None:
         """Successful install."""
         out = ctx.run(ctx.on.install(), testing.State())
-        assert out.unit_status == testing.MaintenanceStatus(charm.CharmStatuses.PREPARING_SERVICES)
+        assert out.unit_status == testing.MaintenanceStatus(charm._CharmStatus.PREPARING_SERVICES)
 
     def test_lnet_networks_config_forwarded(
         self,
@@ -94,7 +94,7 @@ class TestCharmInstall:
         mock_repo_setup.side_effect = RepositoryError("failed to set up PPA")
 
         out = ctx.run(ctx.on.install(), testing.State())
-        assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_REPO_SETUP)
+        assert out.unit_status == testing.BlockedStatus(charm._CharmStatus.FAILED_REPO_SETUP)
 
     def test_packages_error(
         self,
@@ -107,7 +107,7 @@ class TestCharmInstall:
         mocker.patch("charm.apt.add_package", side_effect=PackageError("bad package"))
 
         out = ctx.run(ctx.on.install(), testing.State())
-        expected_message = charm.CharmStatuses.failed_install(LUSTRE_PACKAGES)
+        expected_message = charm._CharmStatus.failed_install(LUSTRE_PACKAGES)
         assert out.unit_status == testing.BlockedStatus(expected_message)
 
     def test_lustre_init_error(
@@ -122,7 +122,7 @@ class TestCharmInstall:
         mock_lnet_init.side_effect = LNetError("")
 
         out = ctx.run(ctx.on.install(), testing.State())
-        assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_LNET_INIT)
+        assert out.unit_status == testing.BlockedStatus(charm._CharmStatus.FAILED_LNET_INIT)
 
 
 class TestCharmStart:
@@ -222,7 +222,7 @@ class TestCharmStart:
 
         out = ctx.run(ctx.on.start(), testing.State(leader=True))
 
-        assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_PEER_DATA)
+        assert out.unit_status == testing.BlockedStatus(charm._CharmStatus.FAILED_PEER_DATA)
 
     def test_leader_initial_deployment_mgs_mds_setup_error(
         self,
@@ -237,7 +237,7 @@ class TestCharmStart:
 
         out = ctx.run(ctx.on.start(), testing.State(leader=True))
 
-        assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_MGS_MDS_SETUP)
+        assert out.unit_status == testing.BlockedStatus(charm._CharmStatus.FAILED_MGS_MDS_SETUP)
 
     def test_leader_initial_deployment_mgs_nids_published_error(
         self,
@@ -254,7 +254,7 @@ class TestCharmStart:
 
         out = ctx.run(ctx.on.start(), testing.State(leader=True))
 
-        assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_MGS_MDS_SETUP)
+        assert out.unit_status == testing.BlockedStatus(charm._CharmStatus.FAILED_MGS_MDS_SETUP)
 
     def test_restart_mgs_unit_setup_error(
         self,
@@ -269,7 +269,7 @@ class TestCharmStart:
 
         out = ctx.run(ctx.on.start(), testing.State(leader=True))
 
-        assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_SERVICE_SETUP)
+        assert out.unit_status == testing.BlockedStatus(charm._CharmStatus.FAILED_SERVICE_SETUP)
 
     def test_restart_oss_unit_setup_error(
         self,
@@ -285,4 +285,4 @@ class TestCharmStart:
 
         out = ctx.run(ctx.on.start(), testing.State(leader=True))
 
-        assert out.unit_status == testing.BlockedStatus(charm.CharmStatuses.FAILED_SERVICE_SETUP)
+        assert out.unit_status == testing.BlockedStatus(charm._CharmStatus.FAILED_SERVICE_SETUP)
