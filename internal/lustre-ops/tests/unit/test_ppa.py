@@ -13,11 +13,12 @@ from lustre_ops.errors import RepositoryCodenameError, RepositoryGPGKeyError, Re
 from pytest_mock import MockerFixture
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture(scope="function", autouse=True)
 def mock_os_release(mocker: MockerFixture) -> MagicMock:
     """Mock platform.freedesktop_os_release."""
-    return mocker.patch(
-        "lustre_ops.ppa.platform.freedesktop_os_release",
+    return mocker.patch.object(
+        ppa.platform,
+        "freedesktop_os_release",
         return_value={"VERSION_CODENAME": "noble"},
     )
 
@@ -27,9 +28,9 @@ class TestSetupLustreRepository:
 
     def test_success(self, mocker: MockerFixture) -> None:
         """Repository is configured and the APT index refreshed."""
-        mock_repo = mocker.patch("lustre_ops.ppa.apt.DebianRepository")
-        mock_mapping = mocker.patch("lustre_ops.ppa.apt.RepositoryMapping").return_value
-        mock_update = mocker.patch("lustre_ops.ppa.apt.update")
+        mock_repo = mocker.patch.object(ppa.apt, "DebianRepository")
+        mock_mapping = mocker.patch.object(ppa.apt, "RepositoryMapping").return_value
+        mock_update = mocker.patch.object(ppa.apt, "update")
 
         ppa.setup_lustre_repository()
 
@@ -43,14 +44,14 @@ class TestSetupLustreRepository:
     ) -> None:
         """Failure to retrieve the OS codename raises error."""
         mock_os_release.return_value = {}
-        mocker.patch("lustre_ops.ppa.apt.DebianRepository")
+        mocker.patch.object(ppa.apt, "DebianRepository")
 
         with pytest.raises(RepositoryCodenameError):
             ppa.setup_lustre_repository()
 
     def test_gpg_key_error(self, mocker: MockerFixture) -> None:
         """GPG key import failure raises error."""
-        mock_repo = mocker.patch("lustre_ops.ppa.apt.DebianRepository").return_value
+        mock_repo = mocker.patch.object(ppa.apt, "DebianRepository").return_value
         mock_repo.import_key.side_effect = apt.GPGKeyError("bad key")
 
         with pytest.raises(RepositoryGPGKeyError):
@@ -58,8 +59,8 @@ class TestSetupLustreRepository:
 
     def test_repo_add_error(self, mocker: MockerFixture) -> None:
         """Repository add/update failure raises error."""
-        mocker.patch("lustre_ops.ppa.apt.DebianRepository")
-        mock_mapping = mocker.patch("lustre_ops.ppa.apt.RepositoryMapping").return_value
+        mocker.patch.object(ppa.apt, "DebianRepository")
+        mock_mapping = mocker.patch.object(ppa.apt, "RepositoryMapping").return_value
         mock_mapping.add.side_effect = CalledProcessError(1, "apt")
 
         with pytest.raises(RepositorySyncError):
@@ -67,9 +68,9 @@ class TestSetupLustreRepository:
 
     def test_update_error(self, mocker: MockerFixture) -> None:
         """apt.update() failure raises error."""
-        mocker.patch("lustre_ops.ppa.apt.DebianRepository")
-        mocker.patch("lustre_ops.ppa.apt.RepositoryMapping")
-        mocker.patch("lustre_ops.ppa.apt.update", side_effect=CalledProcessError(1, "apt update"))
+        mocker.patch.object(ppa.apt, "DebianRepository")
+        mocker.patch.object(ppa.apt, "RepositoryMapping")
+        mocker.patch.object(ppa.apt, "update", side_effect=CalledProcessError(1, "apt update"))
 
         with pytest.raises(RepositorySyncError):
             ppa.setup_lustre_repository()

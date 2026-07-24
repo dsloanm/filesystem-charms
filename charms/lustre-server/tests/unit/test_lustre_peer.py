@@ -130,7 +130,7 @@ class TestMgsNidsPublished:
 class TestOnRelationChanged:
     """_on_relation_changed() tests."""
 
-    @pytest.fixture
+    @pytest.fixture(scope="function")
     def oss_unit(
         self, mocker: MockerFixture, mock_model: MagicMock
     ) -> tuple[MagicMock, MagicMock]:

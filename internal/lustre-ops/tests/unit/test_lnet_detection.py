@@ -215,7 +215,7 @@ class TestRdmaInterfaces:
 class TestIpoibNetdevMap:
     """_ipoib_netdev_map() tests."""
 
-    @pytest.fixture
+    @pytest.fixture(scope="function")
     def sys_class_net(self, mocker: MockerFixture, tmp_path: Path) -> Path:
         """Return sysfs net root mocked to a temp directory."""
         mocker.patch("lustre_ops.lnet_detection.SYS_CLASS_NET", tmp_path)

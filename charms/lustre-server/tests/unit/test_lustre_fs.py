@@ -26,13 +26,13 @@ def mock_run(mocker: MockerFixture) -> MagicMock:
     return mocker.patch("lustre_fs.subprocess.run")
 
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 def pool_missing(mocker: MockerFixture) -> None:
     """Mock _pool_exists to return False."""
     mocker.patch("lustre_fs._pool_exists", return_value=False)
 
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 def pool_exists(mocker: MockerFixture) -> None:
     """Mock _pool_exists to return True."""
     mocker.patch("lustre_fs._pool_exists", return_value=True)
@@ -207,12 +207,12 @@ class TestLustreTarget:
     DATASET = "mgsmdt0"
     FULL_DATASET = f"{POOL}/{DATASET}"
 
-    @pytest.fixture
+    @pytest.fixture(scope="function")
     def target_missing(self, mocker: MockerFixture) -> None:
         """Mock _target_exists to return False."""
         mocker.patch("lustre_fs._target_exists", return_value=False)
 
-    @pytest.fixture
+    @pytest.fixture(scope="function")
     def target_exists(self, mocker: MockerFixture) -> None:
         """Mock _target_exists to return True."""
         mocker.patch("lustre_fs._target_exists", return_value=True)
