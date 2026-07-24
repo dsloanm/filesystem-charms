@@ -278,12 +278,12 @@ def _persist_lnet_config() -> None:
         tmp.touch(mode=0o600)
         tmp.write_text(result)
         tmp.replace(LUSTRE_LNET_CONF)
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError) as e:
+    except (subprocess.CalledProcessError, OSError) as e:
         raise LNetConfigExportError("Failed to write LNet configuration data") from e
 
 
 def _parse_networks(show_output: str) -> dict[str, list[str]]:
-    """Parse all networks and their bound interfaces from ``lnetctl net show`` output.
+    r"""Parse all networks and their bound interfaces from ``lnetctl net show`` output.
 
     Args:
         show_output: The raw stdout of ``lnetctl net show``.
@@ -293,33 +293,34 @@ def _parse_networks(show_output: str) -> dict[str, list[str]]:
 
     Raises:
         LNetParseError: If the given string cannot be parsed.
-    """
-    # Sample `lnetctl net show`:
-    #
-    # net:
-    # -     net type: lo
-    #       local NI(s):
-    #       -     nid: 0@lo
-    #             status: up
-    # -     net type: o2ib
-    #       local NI(s):
-    #       -     nid: 10.0.0.10@o2ib
-    #             status: up
-    #             interfaces:
-    #                   0: enp6s0
-    #       -     nid: 10.0.0.11@o2ib
-    #             status: up
-    #             interfaces:
-    #                   0: enp7s0
-    # -     net type: tcp
-    #       local NI(s):
-    #       -     nid: 10.200.245.133@tcp
-    #             status: up
-    #             interfaces:
-    #                   0: enp5s0
-    #
-    # Gives mapping: `{'lo': [], 'o2ib': ['enp6s0', 'enp7s0'], 'tcp': ['enp5s0']}`
 
+    Examples:
+        >>> show_output = '''\
+        ... net:
+        ... -     net type: lo
+        ...       local NI(s):
+        ...       -     nid: 0@lo
+        ...             status: up
+        ... -     net type: o2ib
+        ...       local NI(s):
+        ...       -     nid: 10.0.0.10@o2ib
+        ...             status: up
+        ...             interfaces:
+        ...                   0: enp6s0
+        ...       -     nid: 10.0.0.11@o2ib
+        ...             status: up
+        ...             interfaces:
+        ...                   0: enp7s0
+        ... -     net type: tcp
+        ...       local NI(s):
+        ...       -     nid: 10.200.245.133@tcp
+        ...             status: up
+        ...             interfaces:
+        ...                   0: enp5s0
+        ... '''
+        >>> _parse_networks(show_output)
+        {'lo': [], 'o2ib': ['enp6s0', 'enp7s0'], 'tcp': ['enp5s0']}
+    """
     try:
         data = yaml.safe_load(show_output)
     except yaml.YAMLError as e:
