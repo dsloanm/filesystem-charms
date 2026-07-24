@@ -4,10 +4,10 @@
 
 """Lustre charm configuration model."""
 
-import pydantic
+from pydantic import BaseModel
 
 
-class LustreConfig(pydantic.BaseModel):
+class LustreConfig(BaseModel):
     """Lustre charm configuration model."""
 
-    lnet_networks: str = pydantic.Field("")
+    lnet_networks: str = ""
