@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from lustre_ops.errors import LNetError
 from pytest_mock import MockerFixture
-from utils.manager import Error, MountsManager
+from utils.manager import Error, MountsManager, lnet
 
 
 @pytest.fixture
@@ -32,7 +32,7 @@ class TestSetupLnet:
         self, manager: MountsManager, mocker: MockerFixture
     ) -> None:
         """LNet is not configured when enable_lustre is False."""
-        mock_init = mocker.patch("utils.manager.lnet.init")
+        mock_init = mocker.patch.object(lnet, "init")
         manager.enable_lustre = False
 
         manager.setup()
@@ -41,7 +41,7 @@ class TestSetupLnet:
 
     def test_config_spec_forwarded(self, manager: MountsManager, mocker: MockerFixture) -> None:
         """A non-empty lnet-networks spec is parsed and forwarded to lnet.init."""
-        mock_init = mocker.patch("utils.manager.lnet.init")
+        mock_init = mocker.patch.object(lnet, "init")
         manager.enable_lustre = True
         manager.lnet_networks_spec = "tcp=eth0; o2ib=ib0,ib1"
 
@@ -55,7 +55,7 @@ class TestSetupLnet:
     def test_lnet_error_wrapped(self, manager: MountsManager, mocker: MockerFixture) -> None:
         """An LNetError from init is wrapped as a manager Error."""
         lnet_error_message = "test lnet error message"
-        mocker.patch("utils.manager.lnet.init", side_effect=LNetError(lnet_error_message))
+        mocker.patch.object(lnet, "init", side_effect=LNetError(lnet_error_message))
         manager.enable_lustre = True
         manager.lnet_networks_spec = ""
 
